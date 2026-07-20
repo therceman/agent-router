@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Router Route",
+  "type": "object",
+  "required": ["schema_version", "task_id", "role", "model_class", "provider_model", "reasoning", "confidence", "hard_rules", "review", "budget"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "model_class": { "enum": ["cheap", "balanced", "expert"] },
+    "reasoning": { "enum": ["low", "medium", "high", "xhigh"] },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+  },
+  "additionalProperties": true
+}

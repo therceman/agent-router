@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Router Event",
+  "type": "object",
+  "required": ["schema_version", "event_id", "type", "at"],
+  "properties": { "schema_version": { "const": 1 }, "event_id": { "type": "string" }, "type": { "type": "string" }, "at": { "type": "string" } },
+  "additionalProperties": true
+}

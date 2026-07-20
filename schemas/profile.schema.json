@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://therceman.dev/agent-router/profile.schema.json",
+  "title": "Agent Router Workflow Profile",
+  "type": "object",
+  "required": ["id", "title", "description", "brain", "roles", "required_review_roles", "requires_plan", "review_pack_purpose"],
+  "properties": {
+    "id": { "enum": ["development", "secure-development-external-brain", "secure-development-local-brain", "security-research"] },
+    "brain": { "enum": ["external-chatgpt", "local-sol", "security-research"] },
+    "roles": { "type": "array", "contains": { "const": "main" } },
+    "required_review_roles": { "type": "array", "items": { "type": "string" } },
+    "requires_plan": { "type": "boolean" },
+    "review_pack_purpose": { "enum": ["implementation", "security", "research"] }
+  },
+  "additionalProperties": true
+}

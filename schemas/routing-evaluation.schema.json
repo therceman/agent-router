@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Routing Evaluation",
+  "type": "object",
+  "required": ["task_id", "selected_route", "completed_without_escalation", "verifier_result", "retries"],
+  "properties": { "retries": { "type": "integer", "minimum": 0 }, "over_routed": { "type": "boolean" }, "under_routed": { "type": "boolean" } },
+  "additionalProperties": true
+}

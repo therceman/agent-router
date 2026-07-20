@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Router Context Bundle",
+  "type": "object",
+  "required": ["schema_version", "task_id", "files", "total_bytes", "excluded", "budget"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "files": { "type": "array" },
+    "total_bytes": { "type": "integer", "minimum": 0 }
+  },
+  "additionalProperties": true
+}

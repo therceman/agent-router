@@ -1,0 +1,57 @@
+{
+  "name": "@therceman/agent-router",
+  "version": "0.6.0",
+  "description": "Token-efficient, deterministic multi-agent development workflow router",
+  "type": "module",
+  "bin": {
+    "agent-router": "dist/cli.js"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "schemas",
+    "docs",
+    "examples",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "bootstrap": "node scripts/bootstrap.mjs",
+    "bootstrap:offline": "node scripts/bootstrap.mjs --offline",
+    "clean": "node scripts/clean.mjs",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "test:compile": "tsc -p tsconfig.test.json",
+    "test": "npm run clean && npm run build && npm run test:compile && node scripts/run-tests.mjs",
+    "test:unit": "npm run clean && npm run test:compile && node scripts/run-tests.mjs unit",
+    "test:integration": "npm run clean && npm run build && npm run test:compile && node scripts/run-tests.mjs integration",
+    "test:routing": "npm run clean && npm run test:compile && node --test .test-dist/tests/unit/router.test.js",
+    "test:provider": "npm run clean && npm run build && npm run test:compile && node --test .test-dist/tests/integration/provider.test.js",
+    "test:review-pack": "npm run clean && npm run build && npm run test:compile && node --test .test-dist/tests/integration/review-pack.test.js",
+    "quality-gates": "npm run typecheck && npm test",
+    "security:audit": "npm audit --audit-level=high",
+    "prepare": "npm run build",
+    "prepack": "npm run quality-gates && npm run build",
+    "test:project": "npm run clean && npm run build && npm run test:compile && node --test .test-dist/tests/integration/project.test.js .test-dist/tests/integration/zero-footprint.test.js"
+  },
+  "keywords": [
+    "codex",
+    "agents",
+    "workflow",
+    "router",
+    "multi-agent",
+    "token-efficiency"
+  ],
+  "author": "therceman",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.3"
+  }
+}

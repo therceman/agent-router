@@ -1,0 +1,11 @@
+node_modules/
+.test-dist/
+*.tgz
+*.zip
+coverage/
+.DS_Store
+dist/
+*.tar.gz
+
+npm-pack-*.json
+*.log

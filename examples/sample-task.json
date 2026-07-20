@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "task_id": "DEV-001",
+  "title": "Implement bounded parser",
+  "profile": "development",
+  "state": "ready",
+  "objective": "Implement one parser with targeted tests",
+  "task_profile": {
+    "task_kind": "implementation",
+    "ambiguity": 1,
+    "semantic_complexity": 2,
+    "security_criticality": 0,
+    "blast_radius": 1,
+    "novelty": 1,
+    "verification_strength": 3,
+    "context_scope": 1,
+    "destructive_potential": 0,
+    "historical_data_impact": 0
+  },
+  "scope": {
+    "allowed_paths": ["src/parser.ts", "tests/parser.test.ts"],
+    "forbidden_paths": [".git", "node_modules", "dist", ".agent-router", ".codex"]
+  },
+  "tests": {
+    "targeted": ["npm test -- parser"],
+    "checkpoint": []
+  },
+  "review": {
+    "required": true,
+    "required_roles": ["external_reviewer"],
+    "sequence": ["external_reviewer"]
+  }
+}
