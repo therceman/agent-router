@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://therceman.dev/agent-router/task.schema.json",
+  "title": "Agent Router Task",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "task_id",
+    "title",
+    "profile",
+    "state",
+    "objective",
+    "task_profile",
+    "scope",
+    "budgets",
+    "review"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "task_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{1,79}$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "profile": {
+      "enum": [
+        "development",
+        "secure-development-external-brain",
+        "secure-development-local-brain",
+        "security-research"
+      ]
+    },
+    "state": {
+      "enum": [
+        "draft",
+        "ready",
+        "routed",
+        "context_ready",
+        "dispatched",
+        "in_progress",
+        "worker_complete",
+        "review_pending",
+        "accepted",
+        "done",
+        "blocked",
+        "rejected",
+        "cancelled",
+        "superseded"
+      ]
+    },
+    "objective": {
+      "type": "string",
+      "minLength": 1
+    },
+    "plan_ref": {
+      "type": "string"
+    },
+    "review": {
+      "type": "object",
+      "required": [
+        "required",
+        "required_roles",
+        "sequence"
+      ],
+      "properties": {
+        "required": {
+          "type": "boolean"
+        },
+        "required_roles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sequence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "superseded_by": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{1,79}$"
+    },
+    "execution": {
+      "type": "object",
+      "required": [
+        "implementation_tier",
+        "attempt"
+      ],
+      "properties": {
+        "implementation_tier": {
+          "enum": [
+            "default",
+            "escalated"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "escalation_reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}

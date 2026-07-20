@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://therceman.dev/agent-router/plan.schema.json",
+  "title": "Agent Router Plan",
+  "type": "object",
+  "required": ["schema_version", "plan_id", "title", "author", "source_file", "created_at"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "plan_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{1,79}$" },
+    "title": { "type": "string", "minLength": 1 },
+    "author": { "enum": ["external-chatgpt", "owner", "local-sol"] },
+    "source_file": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{1,79}\\.md$" },
+    "content_sha256": { "type": "string" },
+    "created_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

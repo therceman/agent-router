@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://therceman.dev/agent-router/session-bootstrap.schema.json",
+  "title": "Agent Router Session Bootstrap",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "active",
+    "project_id",
+    "repository",
+    "state_root",
+    "profile",
+    "enabled_roles",
+    "repository_footprint",
+    "main_contract",
+    "policy",
+    "instruction"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "active": {
+      "const": true
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "repository": {
+      "type": "string"
+    },
+    "state_root": {
+      "type": "string"
+    },
+    "profile": {
+      "enum": [
+        "development",
+        "secure-development-external-brain",
+        "secure-development-local-brain",
+        "security-research"
+      ]
+    },
+    "enabled_roles": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "next_task": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "repository_footprint": {
+      "type": "object",
+      "required": [
+        "agent_router_dir",
+        "codex_dir"
+      ],
+      "properties": {
+        "agent_router_dir": {
+          "const": false
+        },
+        "codex_dir": {
+          "const": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "main_contract": {
+      "type": "string"
+    },
+    "policy": {
+      "type": "string"
+    },
+    "instruction": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

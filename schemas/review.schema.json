@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Router Review",
+  "type": "object",
+  "required": ["schema_version", "task_id", "reviewer", "verdict", "required_followups", "risks"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "verdict": { "enum": ["accepted", "rejected", "accepted_with_followup", "blocked", "architect_review_required", "critical_review_required"] }
+  },
+  "additionalProperties": true
+}
