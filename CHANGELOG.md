@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.0
+
+### Changed
+
+- Machine-global Codex setup is now profile-agnostic: `agent-router setup --provider codex --apply` installs the complete universal local role set.
+- Workflow profiles are selected only during project registration.
+- Global doctor validates the universal machine installation independently of registered projects.
+- v0.6.0 profile-specific machine state migrates to canonical profile-free global state while preserving projects and user-owned Codex files.
+
+### Added
+
+- Strict rejection of setup-level `--profile` and `--roles` options with actionable guidance.
+- Universal role manifest and global configuration schema.
+- Tests for migration, universal role installation, idempotency, multi-profile authorization, and zero-footprint setup.
+
 ## 0.6.0
 
 ### Changed

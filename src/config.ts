@@ -56,6 +56,14 @@ export const ROLE_IDS = [
 ] as const;
 export type RoleId = typeof ROLE_IDS[number];
 
+/**
+ * Roles that can be installed by the provider adapter on a machine.
+ * Project profiles still decide which of these roles are permitted.
+ */
+export function allInstallableRoles(): RoleId[] {
+  return [...ROLE_IDS];
+}
+
 export const ROLE_METADATA: Record<RoleId, {
   name: string;
   description: string;

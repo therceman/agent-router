@@ -70,11 +70,17 @@ async function readProjectRecord(path: string): Promise<ProjectRecord> {
   if (typeof value.name !== 'string' || !value.name) throw new Error(`Invalid project name in ${path}`);
   if (typeof value.profile !== 'string') throw new Error(`Invalid project profile in ${path}`);
   const profile = parseProfile(value.profile);
+  const definition = PROFILE_DEFINITIONS[profile];
   if (value.provider !== 'codex') throw new Error(`Unsupported project provider in ${path}`);
   if (!Array.isArray(value.enabled_roles) || !value.enabled_roles.every((role) => typeof role === 'string' && ROLE_IDS.includes(role as RoleId))) {
     throw new Error(`Invalid enabled roles in ${path}`);
   }
-  if (!value.enabled_roles.includes('main')) throw new Error(`Project roles must include main in ${path}`);
+  const enabledRoles = value.enabled_roles as RoleId[];
+  if (!enabledRoles.includes('main')) throw new Error(`Project roles must include main in ${path}`);
+  const disallowed = enabledRoles.filter((role) => !definition.roles.includes(role));
+  if (disallowed.length) throw new Error(`Project profile ${profile} does not permit roles: ${disallowed.join(', ')}`);
+  const missingRequired = definition.roles.filter((role) => !enabledRoles.includes(role));
+  if (missingRequired.length) throw new Error(`Project profile ${profile} requires roles: ${missingRequired.join(', ')}`);
   const repository = value.repository;
   if (!repository || typeof repository !== 'object' || typeof (repository as Record<string, unknown>).identity !== 'string') {
     throw new Error(`Invalid repository identity in ${path}`);
@@ -206,6 +212,8 @@ export async function registerProject(options: {
   const normalizedRoles = (roles.includes('main') ? [...new Set(roles)] : ['main', ...new Set(roles)]) as RoleId[];
   const missingRequired = definition.roles.filter((role) => !normalizedRoles.includes(role));
   if (missingRequired.length) throw new Error(`Profile ${profile} requires roles: ${missingRequired.join(', ')}`);
+  const disallowed = normalizedRoles.filter((role) => !definition.roles.includes(role));
+  if (disallowed.length) throw new Error(`Profile ${profile} does not permit roles: ${disallowed.join(', ')}`);
 
   const now = new Date().toISOString();
   const existingPath = resolve(stateRoot, 'project.yaml');

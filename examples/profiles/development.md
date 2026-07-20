@@ -1,7 +1,7 @@
 # Example: Development
 
 ```bash
-agent-router setup --provider codex --profile development --apply
+agent-router setup --provider codex --apply
 cd /path/to/project
 agent-router project register --profile development
 codex --profile agent-router

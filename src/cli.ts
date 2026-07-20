@@ -21,7 +21,7 @@ import { completeHandoff, createHandoff, readHandoff, validateHandoff } from './
 import { createProjectReviewPack, createTaskReviewPack, importReview, reviewStatus, type ReviewPackPurpose } from './review.js';
 import { applyDietPlan, createDietPlan, inspectRepository } from './repo.js';
 import { budgetCheck, budgetShow } from './budget.js';
-import { PROFILE_DEFINITIONS, PROFILE_IDS, globalPaths, parseProfile, parseRoleList } from './config.js';
+import { PROFILE_DEFINITIONS, PROFILE_IDS, allInstallableRoles, globalPaths, parseProfile, parseRoleList } from './config.js';
 import { pathExists, readJson } from './lib/fs.js';
 import { createPlan, getPlan, importPlan, listPlans, type PlanAuthor } from './plan.js';
 
@@ -71,7 +71,7 @@ Profiles:
   profile show PROFILE
 
 Global setup:
-  setup --provider codex --profile PROFILE [--roles ...] [--apply|--dry-run]
+  setup --provider codex [--apply|--dry-run]
   setup status | setup rollback
   doctor --global [--json]
 
@@ -113,6 +113,30 @@ Repository and accounting:
   routing stats
 `;
 
+const SETUP_HELP = `Usage:
+  agent-router setup [options]
+
+Options:
+  --provider <provider>
+  --apply
+  --dry-run
+  --json
+
+Workflow profiles belong to registered projects, not machine setup.
+`;
+
+const PROJECT_REGISTER_HELP = `Usage:
+  agent-router project register --profile <profile> [options]
+
+Options:
+  --profile <profile>
+  --name <name>
+  --id <project-id>
+  --roles <role,...>
+  --dry-run
+  --json
+`;
+
 async function globalDoctor(): Promise<Record<string, unknown>> {
   const paths = globalPaths();
   const status = await codexSetupStatus() as {
@@ -122,13 +146,30 @@ async function globalDoctor(): Promise<Record<string, unknown>> {
     profile_path?: string;
     global_agents_path?: string;
     agents?: string[];
-    global_config?: { enabled_roles?: string[]; installed_profiles?: string[] } | null;
+    installed_roles?: string[];
+    role_statuses?: Record<string, { exists: boolean; valid: boolean }>;
+    main_profile_valid?: boolean;
+    global_config?: Record<string, unknown> | null;
   };
-  const expectedAgents = (status.global_config?.enabled_roles ?? ['main', 'implementation_worker'])
+  const expectedRoles = allInstallableRoles();
+  const expectedAgents = expectedRoles
     .filter((role) => role !== 'main')
     .map((role) => `agent-router-${role.replaceAll('_', '-')}.toml`);
   const availableAgents = new Set(status.agents ?? []);
   const missingAgents = expectedAgents.filter((name) => !availableAgents.has(name));
+  const invalidRoleFiles = expectedRoles
+    .filter((role) => role !== 'main')
+    .filter((role) => !status.role_statuses?.[role]?.exists || !status.role_statuses?.[role]?.valid);
+  const installedRoles = new Set(status.installed_roles ?? []);
+  const rolesComplete = expectedRoles.every((role) => installedRoles.has(role)) && installedRoles.size === expectedRoles.length;
+  const globalConfig = status.global_config;
+  const globalConfigObject = globalConfig && typeof globalConfig === 'object' ? globalConfig : {};
+  const profileFree = Boolean(globalConfig)
+    && !Object.hasOwn(globalConfigObject, 'profile')
+    && !Object.hasOwn(globalConfigObject, 'installed_profiles')
+    && !Object.hasOwn(globalConfigObject, 'active_profile')
+    && !Object.hasOwn(globalConfigObject, 'global_profile')
+    && !Object.hasOwn(globalConfigObject, 'setup_profile');
   const checks = [
     { name: 'node_version', ok: Number(process.versions.node.split('.')[0]) >= 20, detail: process.versions.node },
     { name: 'agent_router_home', ok: await pathExists(paths.root), detail: paths.root },
@@ -136,7 +177,11 @@ async function globalDoctor(): Promise<Record<string, unknown>> {
     { name: 'codex_profile', ok: Boolean(status.profile_exists), detail: String(status.profile_path) },
     { name: 'global_agents', ok: Boolean(status.global_agents_managed), detail: String(status.global_agents_path) },
     { name: 'global_agents_not_shadowed', ok: !status.global_override_exists, detail: resolve(paths.codexHome, 'AGENTS.override.md') },
-    { name: 'custom_agents', ok: missingAgents.length === 0, detail: missingAgents.length ? `missing: ${missingAgents.join(', ')}` : expectedAgents.join(', ') },
+    { name: 'machine_profile_free', ok: profileFree, detail: profileFree ? 'No workflow profile is stored at machine scope' : 'Remove stale setup-level workflow profile metadata' },
+    { name: 'installed_version', ok: globalConfig?.installed_version === VERSION, detail: String(globalConfig?.installed_version ?? 'missing') },
+    { name: 'installed_roles', ok: rolesComplete, detail: rolesComplete ? expectedRoles.join(', ') : `expected: ${expectedRoles.join(', ')}` },
+    { name: 'codex_main_profile', ok: Boolean(status.main_profile_valid), detail: String(status.profile_path) },
+    { name: 'custom_agents', ok: missingAgents.length === 0 && invalidRoleFiles.length === 0, detail: missingAgents.length ? `missing: ${missingAgents.join(', ')}` : invalidRoleFiles.length ? `invalid: ${invalidRoleFiles.join(', ')}` : expectedAgents.join(', ') },
   ];
   return { ok: checks.every((check) => check.ok), checks, provider: status };
 }
@@ -174,14 +219,21 @@ async function main(): Promise<number> {
   }
 
   if (command === 'setup') {
+    if (parsed.flags.has('help')) { console.log(SETUP_HELP); return 0; }
+    try {
+      assertAllowedFlags(parsed, ['provider', 'apply', 'dry-run', 'json']);
+    } catch (error) {
+      if (parsed.flags.has('profile')) {
+        throw new Error(`${(error as Error).message}\n\nWorkflow profiles belong to projects, not machine setup.\n\nUse:\n  agent-router setup --provider codex --apply\n  agent-router project register --profile development`);
+      }
+      throw error;
+    }
     const provider = flag(parsed, 'provider', 'codex');
     if (provider !== 'codex') throw new Error(`Unsupported provider: ${provider}`);
     const sub = parsed.positional[0];
     if (sub === 'rollback') { print(await codexSetupRollback(), json); return 0; }
     if (sub === 'status') { print(await codexSetupStatus(), json); return 0; }
-    const profile = parseProfile(flag(parsed, 'profile'));
-    const roles = parseRoleList(flag(parsed, 'roles'), profile);
-    print(await codexSetup({ apply: bool(parsed, 'apply'), dryRun: bool(parsed, 'dry-run') || !bool(parsed, 'apply'), profile, roles }), json);
+    print(await codexSetup({ apply: bool(parsed, 'apply'), dryRun: bool(parsed, 'dry-run') || !bool(parsed, 'apply') }), json);
     return 0;
   }
 
@@ -205,6 +257,7 @@ async function main(): Promise<number> {
   if (command === 'project') {
     const sub = required(parsed.positional[0], 'project subcommand');
     if (sub === 'register') {
+      if (parsed.flags.has('help')) { console.log(PROJECT_REGISTER_HELP); return 0; }
       assertAllowedFlags(parsed, ['profile', 'name', 'id', 'roles', 'dry-run', 'project', 'cwd', 'json']);
       const profile = parseProfile(flag(parsed, 'profile'));
       print(await registerProject({ cwd: projectCwd, dryRun: bool(parsed, 'dry-run'), roles: parseRoleList(flag(parsed, 'roles'), profile), profile, name: flag(parsed, 'name'), projectId: flag(parsed, 'id') }), json);

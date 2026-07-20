@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
-import { tempGitRepo } from '../helpers.js';
+import { pathExists } from '../../src/lib/fs.js';
+import { isolatedHome, tempGitRepo } from '../helpers.js';
 import { run } from '../../src/lib/process.js';
 
 const cli = resolve(process.cwd(), 'dist/cli.js');
@@ -10,7 +11,32 @@ test('CLI help and version exit successfully', () => {
   const help = run(process.execPath, [cli, '--help']);
   assert.equal(help.status, 0); assert.match(help.stdout, /Agent Router/);
   const version = run(process.execPath, [cli, '--version']);
-  assert.equal(version.status, 0); assert.match(version.stdout, /0\.6\.0/);
+  assert.equal(version.status, 0); assert.match(version.stdout, /0\.7\.0/);
+});
+
+test('setup is profile-agnostic and project registration retains profile selection', async () => {
+  const home = await isolatedHome();
+  const setupHelp = run(process.execPath, [cli, 'setup', '--help']);
+  assert.equal(setupHelp.status, 0);
+  assert.doesNotMatch(setupHelp.stdout, /--profile/);
+  const registerHelp = run(process.execPath, [cli, 'project', 'register', '--help']);
+  assert.equal(registerHelp.status, 0);
+  assert.match(registerHelp.stdout, /--profile <profile>/);
+
+  const invalid = run(process.execPath, [cli, 'setup', '--provider', 'codex', '--profile', 'development', '--apply']);
+  assert.notEqual(invalid.status, 0);
+  assert.match(invalid.stderr, /Unknown option: --profile/);
+  assert.match(invalid.stderr, /Workflow profiles belong to projects/);
+  assert.equal(await pathExists(resolve(home, '.agent-router/config.yaml')), false);
+  assert.equal(await pathExists(resolve(home, '.codex/AGENTS.md')), false);
+
+  const setup = run(process.execPath, [cli, 'setup', '--provider', 'codex', '--apply']);
+  assert.equal(setup.status, 0, setup.stderr);
+  const globalDoctor = run(process.execPath, [cli, 'doctor', '--global', '--json']);
+  assert.equal(globalDoctor.status, 0, globalDoctor.stderr);
+  const result = JSON.parse(globalDoctor.stdout) as { ok: boolean; checks: Array<{ name: string; ok: boolean }> };
+  assert.equal(result.ok, true);
+  assert.equal(result.checks.find((check) => check.name === 'machine_profile_free')?.ok, true);
 });
 
 test('CLI reports unknown commands as nonzero', () => {

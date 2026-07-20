@@ -6,9 +6,9 @@ It generates:
 
 - `~/.codex/agent-router.config.toml` for the Luna-low main session;
 - one managed Agent Router block in `~/.codex/AGENTS.md`;
-- role definitions under `~/.codex/agents/`;
+- all built-in local role definitions under `~/.codex/agents/`;
 - global Agent Router configuration under `~/.agent-router/`.
 
-Provider setup is explicit, plan-first, backup-aware, and reversible. Installing another workflow profile accumulates required custom-agent files rather than deleting previously installed roles.
+Provider setup is profile-agnostic, explicit, backup-aware, idempotent, and reversible. It does not receive or persist a workflow profile. Project registration persists the profile externally and project routing enforces its permitted roles.
 
 Future provider adapters must preserve the home-based zero-footprint invariant, deterministic routing, ordered review gates, and role ownership.

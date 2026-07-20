@@ -4,6 +4,7 @@ import { AGENTS_END, AGENTS_START, VERSION } from './constants.js';
 import {
   DEFAULT_MODEL_MAP,
   PROFILE_DEFINITIONS,
+  allInstallableRoles,
   globalPaths,
   policyForProfile,
   type ProfileId,
@@ -134,12 +135,17 @@ export async function doctorProject(cwd?: string): Promise<{
   add('codex_profile', Boolean(provider.profile_exists), '~/.codex/agent-router.config.toml');
   add('global_agents', Boolean(provider.global_agents_managed), '~/.codex/AGENTS.md');
   add('global_agents_effective', !provider.global_override_exists, '~/.codex/AGENTS.override.md must not shadow AGENTS.md', 'warning');
-  const expectedAgents = runtime.project.enabled_roles
+  const requiredProfileRoles = PROFILE_DEFINITIONS[runtime.project.profile].roles;
+  const disallowedProjectRoles = runtime.project.enabled_roles.filter((role) => !requiredProfileRoles.includes(role));
+  add('profile_roles_authorized', disallowedProjectRoles.length === 0, disallowedProjectRoles.length ? `disallowed: ${disallowedProjectRoles.join(', ')}` : runtime.project.profile);
+  const expectedAgents = requiredProfileRoles
     .filter((role) => role !== 'main')
     .map((role) => `agent-router-${role.replaceAll('_', '-')}.toml`);
   const availableAgents = new Set(provider.agents ?? []);
   const missingAgents = expectedAgents.filter((name) => !availableAgents.has(name));
-  add('codex_agents_available', missingAgents.length === 0, missingAgents.length ? `missing: ${missingAgents.join(', ')}` : expectedAgents.join(', '));
+  const installedRoles = new Set((provider as { installed_roles?: string[] }).installed_roles ?? allInstallableRoles());
+  const missingInstalledRoles = requiredProfileRoles.filter((role) => !installedRoles.has(role));
+  add('codex_agents_available', missingAgents.length === 0 && missingInstalledRoles.length === 0, missingAgents.length ? `missing files: ${missingAgents.join(', ')}` : missingInstalledRoles.length ? `missing global roles: ${missingInstalledRoles.join(', ')}` : expectedAgents.join(', '));
   const sync = await syncProject({ cwd: runtime.repoRoot, check: true });
   add('managed_files_current', (sync as { current: boolean }).current, `${((sync as { stale: string[] }).stale).length} stale`);
   return { ok: checks.filter((c) => c.severity !== 'warning').every((c) => c.ok), checks };

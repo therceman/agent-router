@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://therceman.dev/agent-router/global-config.schema.json",
+  "title": "Agent Router Machine Global Configuration",
+  "description": "Profile-agnostic machine installation state stored under ~/.agent-router/config.yaml.",
+  "type": "object",
+  "required": ["schema_version", "provider", "installed_version", "installed_roles", "codex_home"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "provider": { "const": "codex" },
+    "installed_version": { "type": "string", "minLength": 1 },
+    "installed_roles": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "main",
+          "repo_janitor",
+          "scout",
+          "implementation_worker",
+          "implementation_escalation_worker",
+          "verifier",
+          "architect",
+          "security_reviewer",
+          "security_researcher",
+          "critical_reviewer"
+        ]
+      }
+    },
+    "codex_home": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": false
+}

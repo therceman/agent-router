@@ -11,4 +11,6 @@ Agent Router ships four explicit profiles:
 
 Profiles define default roles, plan requirement, review sequence, and review-pack purpose. They do not change the storage architecture or create workflow files in a work repository.
 
+Profiles are project configuration, not machine installation configuration. Run global setup once with `agent-router setup --provider codex --apply`, then select a profile independently for each registered project. The profile's roles are an authorization boundary even though all local role files are installed globally.
+
 A future profile must use a distinct ID and may not silently change another profile’s semantics.

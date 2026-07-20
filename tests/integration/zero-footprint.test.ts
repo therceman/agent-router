@@ -18,6 +18,8 @@ import { buildContext } from '../../src/context.js';
 import { createTaskReviewPack } from '../../src/review.js';
 import { pathExists, writeJson } from '../../src/lib/fs.js';
 import { globalPaths } from '../../src/config.js';
+import { codexSetup } from '../../src/provider/codex.js';
+import { doctorProject } from '../../src/project.js';
 
 async function createRepo(remote?: string): Promise<string> {
   const root = await mkdtemp(resolve(tmpdir(), 'agent-router-external-'));
@@ -52,6 +54,7 @@ test('registration and bootstrap make zero writes in the work repository', async
   await isolatedHome();
   const root = await createRepo('git@example.invalid:team/project.git');
   await writeFile(resolve(root, 'AGENTS.md'), '# Company-owned instructions\n');
+  await codexSetup({ apply: true, dryRun: false });
   const before = await snapshot(root);
   const registered = await registerProject({ cwd: root, roles: ['main', 'implementation_worker', 'implementation_escalation_worker'] }) as {
     state_root: string;
@@ -75,6 +78,8 @@ test('registration and bootstrap make zero writes in the work repository', async
   assert.equal(Object.hasOwn(boot, 'mode'), false);
   assert.deepEqual(boot.enabled_roles, ['main', 'implementation_worker', 'implementation_escalation_worker']);
   assert.deepEqual(boot.repository_footprint, { agent_router_dir: false, codex_dir: false });
+  assert.equal((await doctorProject(root)).ok, true);
+  assert.deepEqual(await snapshot(root), before);
 });
 
 test('the same normalized Git remote produces a stable project ID across machines', async () => {

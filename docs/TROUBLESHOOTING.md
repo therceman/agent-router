@@ -55,5 +55,5 @@ Use `npm run bootstrap:offline` only when all lockfile packages are already cach
 For installation rather than source development, use the local release tarball. It contains compiled `dist/` and no runtime dependencies:
 
 ```bash
-npm install -g ./agent-router-0.6.0-npm.tgz --no-audit --no-fund
+npm install -g ./therceman-agent-router-0.7.0.tgz --no-audit --no-fund
 ```

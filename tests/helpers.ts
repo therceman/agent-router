@@ -28,9 +28,8 @@ export async function tempGitRepo(prefix = 'agent-router-test-'): Promise<string
 
 export async function initializedRepo(profile: ProfileId = 'development'): Promise<string> {
   const root = await tempGitRepo();
-  const roles = undefined;
-  await codexSetup({ apply: true, dryRun: false, profile, roles: roles ? [...roles] : (await import('../src/config.js')).PROFILE_DEFINITIONS[profile].roles });
-  await registerProject({ cwd: root, profile, ...(roles ? { roles: [...roles] } : {}) });
+  await codexSetup({ apply: true, dryRun: false });
+  await registerProject({ cwd: root, profile });
   return root;
 }
 

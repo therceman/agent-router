@@ -43,3 +43,5 @@ escalation/correctness            → Terra-high
 architecture/security judgment   → Sol
 rare critical verdict            → Sol-xhigh
 ```
+
+All local roles are installed by machine setup so different projects can use different profiles without rerunning setup. Installation only creates configuration; a role consumes model capacity only when a session is invoked. Project profiles remain the authorization boundary for routing and dispatch.

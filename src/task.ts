@@ -285,6 +285,9 @@ export async function routeAndPersist(taskId: string, cwd?: string): Promise<Ret
   }
   const route = routeTask(task);
   const enabledRoles = project.enabled_roles ?? [...ROLE_IDS];
+  if (!definition.roles.includes(route.role as RoleId)) {
+    throw new Error(`Role ${route.role} is not permitted by profile ${project.profile}`);
+  }
   if (!enabledRoles.includes(route.role as RoleId)) {
     throw new Error(`Route requires disabled role ${route.role}. Enabled roles: ${enabledRoles.join(', ')}. Reclassify the task or register the project with the required profile.`);
   }

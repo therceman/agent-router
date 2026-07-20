@@ -18,7 +18,15 @@ There is no storage-mode selector. Agent Router always writes Codex integration 
 
 - `~/.codex/AGENTS.md`: opt-in global orchestration contract in one managed block.
 - `~/.codex/agent-router.config.toml`: Luna-low named profile.
-- `~/.codex/agents/agent-router-*.toml`: role-specific custom-agent definitions.
+- `~/.codex/agents/agent-router-*.toml`: all built-in local role definitions.
+
+Machine setup is profile-agnostic and runs once:
+
+```bash
+agent-router setup --provider codex --apply
+```
+
+It installs provider integration and every local role. Project profiles are stored only under `~/.agent-router/projects/<project-id>/` and authorize which installed roles may be routed. Installing role files does not invoke a model or consume model tokens.
 
 ### Agent Router state
 
@@ -48,15 +56,16 @@ Project identity is based on normalized Git remote plus a hash. Machine-specific
 
 ## Control flow
 
-1. Luna bootstraps compact home-based state.
-2. The selected profile determines planning brain, roles, and ordered review gates.
-3. Router classifies one bounded task using typed properties and deterministic hard rules.
-4. Context builder enforces path and byte budgets.
-5. A disposable worker performs one task.
-6. Worker writes a structured handoff under `~/.agent-router`.
-7. Luna runs only declared deterministic checks and validates mechanics.
-8. Required independent reviewers run in order.
-9. Only after all gates pass may Luna accept the task.
+1. Machine setup installs provider integration and all local built-in roles.
+2. Luna bootstraps compact home-based state.
+3. The selected project profile determines planning brain, permitted roles, and ordered review gates.
+4. Router classifies one bounded task using typed properties and deterministic hard rules.
+5. Context builder enforces path and byte budgets.
+6. A disposable worker performs one task.
+7. Worker writes a structured handoff under `~/.agent-router`.
+8. Luna runs only declared deterministic checks and validates mechanics.
+9. Required independent reviewers run in order.
+10. Only after all gates pass may Luna accept the task.
 
 ## Trust boundaries
 

@@ -8,20 +8,14 @@ npm run quality-gates
 npm install -g .
 ```
 
-Install the profiles needed on this machine. Setup accumulates role definitions and does not remove agents installed by earlier profile setup.
+Configure the machine once. Setup is profile-agnostic and installs every built-in local role. Workflow profiles are selected only when projects are registered.
 
 ```bash
-agent-router setup --provider codex --profile development --apply
-agent-router setup --provider codex --profile secure-development-external-brain --apply
-agent-router setup --provider codex --profile secure-development-local-brain --apply
-agent-router setup --provider codex --profile security-research --apply
-```
-
-Installing only one profile is valid.
-
-```bash
+agent-router setup --provider codex --apply
 agent-router doctor --global
 ```
+
+Installing all roles does not invoke agents or consume model tokens. Project profiles still constrain routing and dispatch.
 
 For an existing registered project cloned on the new machine:
 

@@ -124,46 +124,19 @@ Check:
 
 ```bash
 agent-router --version
-# 0.6.0
+# 0.7.0
 ```
 
-## Configure Codex
+## Configure Codex globally
 
-Normal development:
+Machine setup is profile-agnostic and runs once per machine. It installs the complete local Agent Router role set; it does not select a workflow profile:
 
 ```bash
-agent-router setup \
-  --provider codex \
-  --profile development \
-  --apply
+agent-router setup --provider codex --apply
+agent-router doctor --global
 ```
 
-Secure development with ChatGPT as the brain:
-
-```bash
-agent-router setup \
-  --provider codex \
-  --profile secure-development-external-brain \
-  --apply
-```
-
-Secure development with local Sol as the brain:
-
-```bash
-agent-router setup \
-  --provider codex \
-  --profile secure-development-local-brain \
-  --apply
-```
-
-Authorized security research:
-
-```bash
-agent-router setup \
-  --provider codex \
-  --profile security-research \
-  --apply
-```
+All custom role files under `~/.codex/agents/` are available to the provider, but a project profile still authorizes which roles may be routed for that project. Installing a role does not invoke a model or consume model tokens.
 
 Setup safely updates:
 
@@ -174,10 +147,10 @@ Setup safely updates:
 ~/.agent-router/config.yaml
 ```
 
-Existing `~/.codex/AGENTS.md` content is preserved outside one managed block. Setup supports dry-run, backups, and rollback:
+Existing `~/.codex/AGENTS.md` content is preserved outside one managed block. Setup supports dry-run, backups, migration from v0.6.0, and rollback:
 
 ```bash
-agent-router setup --provider codex --profile development --dry-run
+agent-router setup --provider codex --dry-run
 agent-router setup rollback
 agent-router doctor --global
 ```
@@ -198,6 +171,19 @@ Or select another profile:
 ```bash
 agent-router project register \
   --profile secure-development-external-brain
+```
+
+The same machine setup supports different profiles in different repositories:
+
+```bash
+cd ~/git/application
+agent-router project register --profile development
+
+cd ~/git/payment-service
+agent-router project register --profile secure-development-external-brain
+
+cd ~/git/bugbounty
+agent-router project register --profile security-research
 ```
 
 Registration reads Git identity and stores state externally:
@@ -441,5 +427,5 @@ npm run bootstrap:offline
 The shipped npm tarball has zero runtime dependencies and can be installed from a local file without registry access:
 
 ```bash
-npm install -g ./agent-router-0.6.0-npm.tgz --no-audit --no-fund
+npm install -g ./therceman-agent-router-0.7.0.tgz --no-audit --no-fund
 ```

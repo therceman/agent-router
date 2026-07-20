@@ -1,14 +1,13 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { AGENTS_END, AGENTS_START } from '../constants.js';
+import { AGENTS_END, AGENTS_START, VERSION } from '../constants.js';
 import { atomicWrite, backupFile, ensureDir, pathExists, readJson, removeIfExists, writeJson } from '../lib/fs.js';
 import { upsertManagedBlock, removeManagedBlock } from '../lib/managed-block.js';
 import {
   DEFAULT_MODEL_MAP,
-  PROFILE_DEFINITIONS,
   ROLE_METADATA,
+  allInstallableRoles,
   globalPaths,
-  type ProfileId,
   type RoleId,
 } from '../config.js';
 import { GLOBAL_AGENTS_BLOCK } from '../templates.js';
@@ -76,47 +75,79 @@ async function managedGlobalAgents(path: string): Promise<string> {
   return upsertManagedBlock(existing, { start: AGENTS_START, end: AGENTS_END, body: GLOBAL_AGENTS_BLOCK });
 }
 
+interface LegacyGlobalConfigRecord {
+  schema_version: 1;
+  provider: 'codex';
+  installed_version?: string;
+  installed_roles?: RoleId[];
+  installed_profiles?: string[];
+  enabled_roles?: RoleId[];
+  codex_home: string;
+}
+
 interface GlobalConfigRecord {
   schema_version: 1;
   provider: 'codex';
-  installed_profiles: ProfileId[];
-  enabled_roles: RoleId[];
+  installed_version: string;
+  installed_roles: RoleId[];
   codex_home: string;
+}
+
+function roleFilePath(role: Exclude<RoleId, 'main'>): string {
+  return resolve(globalPaths().codexHome, 'agents', `agent-router-${role.replaceAll('_', '-')}.toml`);
+}
+
+function expectedRoleConfig(role: Exclude<RoleId, 'main'>): { model: string; reasoning: string } {
+  const config = DEFAULT_MODEL_MAP.roles[role];
+  return {
+    model: DEFAULT_MODEL_MAP.models[config.model].provider_model,
+    reasoning: config.reasoning,
+  };
+}
+
+function roleConfigIsValid(role: Exclude<RoleId, 'main'>, content: string): boolean {
+  const expected = expectedRoleConfig(role);
+  return content.includes(`model = ${JSON.stringify(expected.model)}`)
+    && content.includes(`model_reasoning_effort = ${JSON.stringify(expected.reasoning)}`)
+    && content.includes(`name = ${JSON.stringify(ROLE_METADATA[role].name)}`)
+    && content.includes(`sandbox_mode = ${JSON.stringify(ROLE_METADATA[role].sandbox_mode)}`);
 }
 
 export async function codexSetup(options: {
   apply: boolean;
   dryRun: boolean;
-  profile: ProfileId;
-  roles: RoleId[];
 }): Promise<Record<string, unknown>> {
   const paths = globalPaths();
-  const requiredRoles = PROFILE_DEFINITIONS[options.profile].roles;
-  const missingRequired = requiredRoles.filter((role) => !options.roles.includes(role));
-  if (missingRequired.length) throw new Error(`Profile ${options.profile} requires roles: ${missingRequired.join(', ')}`);
   const agentsPath = resolve(paths.codexHome, 'AGENTS.md');
   const overridePath = resolve(paths.codexHome, 'AGENTS.override.md');
   const configPath = resolve(paths.root, 'config.yaml');
-  const existingConfig = (await pathExists(configPath)) ? await readJson<GlobalConfigRecord>(configPath) : null;
-  const installedProfiles = [...new Set([...(existingConfig?.installed_profiles ?? []), options.profile])];
-  const installedRoles = [...new Set([...(existingConfig?.enabled_roles ?? ['main']), ...options.roles])] as RoleId[];
+  const existingConfig = (await pathExists(configPath)) ? await readJson<LegacyGlobalConfigRecord>(configPath) : null;
+  const installedRoles = allInstallableRoles();
+  const legacyProfileMetadata = Array.isArray(existingConfig?.installed_profiles);
+  const config: GlobalConfigRecord = {
+    schema_version: 1,
+    provider: 'codex',
+    installed_version: VERSION,
+    installed_roles: installedRoles,
+    codex_home: paths.codexHome,
+  };
+  const configContent = `${JSON.stringify(config, null, 2)}\n`;
   const files: Array<{ path: string; content: string }> = [
     { path: resolve(paths.codexHome, 'agent-router.config.toml'), content: mainProfile() },
     { path: agentsPath, content: await managedGlobalAgents(agentsPath) },
+    { path: configPath, content: configContent },
   ];
-  for (const role of childRoles(options.roles)) {
-    files.push({ path: resolve(paths.codexHome, 'agents', `agent-router-${role.replaceAll('_', '-')}.toml`), content: roleToml(role) });
+  for (const role of childRoles(installedRoles)) {
+    files.push({ path: roleFilePath(role), content: roleToml(role) });
   }
   const warnings: string[] = [];
   if (await pathExists(overridePath)) warnings.push(`${overridePath} exists and takes precedence over ${agentsPath}; merge the Agent Router block into the override or remove the override.`);
   const plan = {
     provider: 'codex',
     apply: options.apply,
-    profile: options.profile,
-    profile_description: PROFILE_DEFINITIONS[options.profile].description,
-    roles: options.roles,
-    installed_profiles: installedProfiles,
     installed_roles: installedRoles,
+    installed_version: config.installed_version,
+    legacy_profile_metadata_removed: legacyProfileMetadata,
     agent_router_home: paths.root,
     codex_home: paths.codexHome,
     files: files.map(({ path }) => path),
@@ -135,16 +166,11 @@ export async function codexSetup(options: {
   await ensureDir(paths.backups);
   const backups: Array<{ path: string; backup: string | null }> = [];
   for (const file of files) {
+    const existing = (await pathExists(file.path)) ? await readFile(file.path, 'utf8') : null;
+    if (existing === file.content) continue;
     backups.push({ path: file.path, backup: await backupFile(file.path) });
     await atomicWrite(file.path, file.content);
   }
-  await writeJson(configPath, {
-    schema_version: 1,
-    provider: 'codex',
-    installed_profiles: installedProfiles,
-    enabled_roles: installedRoles,
-    codex_home: paths.codexHome,
-  } satisfies GlobalConfigRecord);
   await writeJson(resolve(paths.root, 'last-setup.json'), { ...plan, backups, applied_at: new Date().toISOString() });
   return { ...plan, applied: true, backups };
 }
@@ -160,6 +186,18 @@ export async function codexSetupStatus(): Promise<Record<string, unknown>> {
     : [];
   const agentsText = (await pathExists(agentsPath)) ? await readFile(agentsPath, 'utf8') : '';
   const globalConfigPath = resolve(paths.root, 'config.yaml');
+  const globalConfig = (await pathExists(globalConfigPath))
+    ? await readJson<LegacyGlobalConfigRecord>(globalConfigPath)
+    : null;
+  const roleStatuses: Record<string, { path: string; exists: boolean; valid: boolean; model: string; reasoning: string }> = {};
+  for (const role of childRoles(allInstallableRoles())) {
+    const path = roleFilePath(role);
+    const exists = await pathExists(path);
+    const content = exists ? await readFile(path, 'utf8') : '';
+    const expected = expectedRoleConfig(role);
+    roleStatuses[role] = { path, exists, valid: exists && roleConfigIsValid(role, content), ...expected };
+  }
+  const mainContent = (await pathExists(profilePath)) ? await readFile(profilePath, 'utf8') : '';
   return {
     provider: 'codex',
     agent_router_home: paths.root,
@@ -171,7 +209,10 @@ export async function codexSetupStatus(): Promise<Record<string, unknown>> {
     global_override_path: overridePath,
     global_override_exists: await pathExists(overridePath),
     agents,
-    global_config: (await pathExists(globalConfigPath)) ? await readJson(globalConfigPath) : null,
+    installed_roles: globalConfig?.installed_roles ?? globalConfig?.enabled_roles ?? [],
+    role_statuses: roleStatuses,
+    main_profile_valid: mainContent.includes('model = "gpt-5.6-luna"') && mainContent.includes('model_reasoning_effort = "low"'),
+    global_config: globalConfig,
     last_setup: (await pathExists(resolve(paths.root, 'last-setup.json'))) ? await readJson(resolve(paths.root, 'last-setup.json')) : null,
   };
 }

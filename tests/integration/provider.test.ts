@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { codexSetup, codexSetupRollback, codexSetupStatus } from '../../src/provider/codex.js';
 import { pathExists } from '../../src/lib/fs.js';
-import { PROFILE_DEFINITIONS } from '../../src/config.js';
+import { allInstallableRoles, DEFAULT_MODEL_MAP, ROLE_METADATA } from '../../src/config.js';
 
 async function useHome(): Promise<string> {
   const home = await mkdtemp(resolve(tmpdir(), 'ar-home-'));
@@ -14,99 +14,109 @@ async function useHome(): Promise<string> {
   return home;
 }
 
-test('development setup writes Luna-low main, Luna-xhigh coder, and Terra-high escalation worker', async () => {
+function rolePath(home: string, role: string): string {
+  return resolve(home, '.codex', 'agents', `agent-router-${role.replaceAll('_', '-')}.toml`);
+}
+
+test('profile-agnostic setup installs every universal local role', async () => {
   const home = await useHome();
-  const roles = PROFILE_DEFINITIONS.development.roles;
-  const dry = await codexSetup({ apply: false, dryRun: true, profile: 'development', roles });
+  const dry = await codexSetup({ apply: false, dryRun: true });
   assert.equal(dry.applied, false);
+  assert.equal(Object.hasOwn(dry, 'profile'), false);
   assert.equal(await pathExists(resolve(home, '.codex/agent-router.config.toml')), false);
-  await codexSetup({ apply: true, dryRun: false, profile: 'development', roles });
+
+  const result = await codexSetup({ apply: true, dryRun: false });
+  assert.deepEqual(result.installed_roles, allInstallableRoles());
+  assert.equal(Object.hasOwn(result, 'profile'), false);
   const profile = await readFile(resolve(home, '.codex/agent-router.config.toml'), 'utf8');
   assert.match(profile, /^model = "gpt-5\.6-luna"/m);
   assert.match(profile, /max_threads = 2/);
   const globalAgents = await readFile(resolve(home, '.codex/AGENTS.md'), 'utf8');
   assert.match(globalAgents, /Keep Agent Router metadata outside the work repository/);
-  assert.match(globalAgents, /mechanical checks/);
-  const worker = await readFile(resolve(home, '.codex/agents/agent-router-implementation-worker.toml'), 'utf8');
-  assert.match(worker, /^name = /m);
-  assert.match(worker, /model = "gpt-5\.6-luna"/);
-  assert.match(worker, /model_reasoning_effort = "xhigh"/);
-  const escalation = await readFile(resolve(home, '.codex/agents/agent-router-implementation-escalation-worker.toml'), 'utf8');
-  assert.match(escalation, /model = "gpt-5\.6-terra"/);
-  assert.match(escalation, /model_reasoning_effort = "high"/);
-  assert.match(worker, /sandbox_mode = "workspace-write"/);
-  assert.equal(await pathExists(resolve(home, '.codex/agents/agent-router-security-reviewer.toml')), false);
-  const globalConfig = JSON.parse(await readFile(resolve(home, '.agent-router/config.yaml'), 'utf8')) as Record<string, unknown>;
-  assert.equal(Object.hasOwn(globalConfig, 'mode'), false);
+
+  for (const role of allInstallableRoles().filter((item) => item !== 'main')) {
+    const content = await readFile(rolePath(home, role), 'utf8');
+    const config = DEFAULT_MODEL_MAP.roles[role];
+    const model = DEFAULT_MODEL_MAP.models[config.model].provider_model;
+    assert.match(content, new RegExp(`name = ${JSON.stringify(ROLE_METADATA[role].name)}`));
+    assert.match(content, new RegExp(`model = ${JSON.stringify(model)}`));
+    assert.match(content, new RegExp(`model_reasoning_effort = ${JSON.stringify(config.reasoning)}`));
+  }
 });
 
-test('secure external-brain setup installs Terra verifier and Sol security reviewer', async () => {
+test('setup is idempotent and does not remove unrelated Codex agents', async () => {
   const home = await useHome();
-  const profile = 'secure-development-external-brain' as const;
-  await codexSetup({ apply: true, dryRun: false, profile, roles: PROFILE_DEFINITIONS[profile].roles });
-  const verifier = await readFile(resolve(home, '.codex/agents/agent-router-verifier.toml'), 'utf8');
-  const security = await readFile(resolve(home, '.codex/agents/agent-router-security-reviewer.toml'), 'utf8');
-  assert.match(verifier, /model = "gpt-5\.6-terra"/);
-  assert.match(security, /model = "gpt-5\.6-sol"/);
-  assert.match(security, /security regressions/);
+  await mkdir(resolve(home, '.codex/agents'), { recursive: true });
+  await writeFile(resolve(home, '.codex/agents/user-owned.toml'), 'name = "user-owned"\n');
+  await codexSetup({ apply: true, dryRun: false });
+  const configBefore = await readFile(resolve(home, '.agent-router/config.yaml'), 'utf8');
+  const agentsBefore = await readFile(resolve(home, '.codex/AGENTS.md'), 'utf8');
+  await codexSetup({ apply: true, dryRun: false });
+  assert.equal(await readFile(resolve(home, '.agent-router/config.yaml'), 'utf8'), configBefore);
+  assert.equal(await readFile(resolve(home, '.codex/AGENTS.md'), 'utf8'), agentsBefore);
+  assert.equal(await readFile(resolve(home, '.codex/agents/user-owned.toml'), 'utf8'), 'name = "user-owned"\n');
+  assert.equal(agentsBefore.split('<!-- agent-router:start -->').length - 1, 1);
 });
 
-test('secure local-brain setup additionally installs Sol architect', async () => {
+test('v0.6 profile-specific machine state migrates without changing projects or user files', async () => {
   const home = await useHome();
-  const profile = 'secure-development-local-brain' as const;
-  await codexSetup({ apply: true, dryRun: false, profile, roles: PROFILE_DEFINITIONS[profile].roles });
-  const architect = await readFile(resolve(home, '.codex/agents/agent-router-architect.toml'), 'utf8');
-  assert.match(architect, /model = "gpt-5\.6-sol"/);
-  assert.match(architect, /Create or review a bounded implementation plan/);
-});
+  await mkdir(resolve(home, '.agent-router'), { recursive: true });
+  await mkdir(resolve(home, '.codex/agents'), { recursive: true });
+  await writeFile(resolve(home, '.agent-router/config.yaml'), `${JSON.stringify({
+    schema_version: 1,
+    provider: 'codex',
+    installed_profiles: ['development', 'security-research'],
+    enabled_roles: ['main', 'implementation_worker'],
+    codex_home: resolve(home, '.codex'),
+  }, null, 2)}\n`);
+  await writeFile(resolve(home, '.codex/AGENTS.md'), '# User content\n');
+  await writeFile(resolve(home, '.codex/agents/user-owned.toml'), 'name = "user-owned"\n');
+  await writeFile(rolePath(home, 'implementation_worker'), '# old managed role\n');
 
-test('security-research setup is distinct from secure development', async () => {
-  const home = await useHome();
-  const profile = 'security-research' as const;
-  await codexSetup({ apply: true, dryRun: false, profile, roles: PROFILE_DEFINITIONS[profile].roles });
-  assert.equal(await pathExists(resolve(home, '.codex/agents/agent-router-security-researcher.toml')), true);
-  assert.equal(await pathExists(resolve(home, '.codex/agents/agent-router-implementation-worker.toml')), false);
-});
-
-test('setup accumulates profiles and roles instead of deleting prior agents', async () => {
-  const home = await useHome();
-  await codexSetup({ apply: true, dryRun: false, profile: 'secure-development-local-brain', roles: PROFILE_DEFINITIONS['secure-development-local-brain'].roles });
-  const architect = resolve(home, '.codex/agents/agent-router-architect.toml');
-  assert.equal(await pathExists(architect), true);
-  await codexSetup({ apply: true, dryRun: false, profile: 'development', roles: PROFILE_DEFINITIONS.development.roles });
-  assert.equal(await pathExists(architect), true);
-  const status = await codexSetupStatus() as { global_config: { installed_profiles: string[] } };
-  assert.deepEqual(new Set(status.global_config.installed_profiles), new Set(['secure-development-local-brain', 'development']));
+  const result = await codexSetup({ apply: true, dryRun: false }) as { legacy_profile_metadata_removed: boolean };
+  assert.equal(result.legacy_profile_metadata_removed, true);
+  const config = JSON.parse(await readFile(resolve(home, '.agent-router/config.yaml'), 'utf8')) as Record<string, unknown>;
+  assert.equal(config.installed_version, '0.7.0');
+  assert.deepEqual(config.installed_roles, allInstallableRoles());
+  assert.equal(Object.hasOwn(config, 'installed_profiles'), false);
+  assert.equal(Object.hasOwn(config, 'enabled_roles'), false);
+  assert.equal(await readFile(resolve(home, '.codex/AGENTS.md'), 'utf8').then((value) => value.startsWith('# User content')), true);
+  assert.equal(await readFile(resolve(home, '.codex/agents/user-owned.toml'), 'utf8'), 'name = "user-owned"\n');
+  assert.equal(await pathExists(rolePath(home, 'security_researcher')), true);
 });
 
 test('setup preserves existing AGENTS content and warns about override shadowing', async () => {
   const home = await useHome();
   await mkdir(resolve(home, '.codex'), { recursive: true });
+  await mkdir(resolve(home, '.agent-router'), { recursive: true });
   await writeFile(resolve(home, '.codex/AGENTS.md'), '# Personal rules\n');
   await writeFile(resolve(home, '.codex/AGENTS.override.md'), '# Override\n');
-  const result = await codexSetup({ apply: true, dryRun: false, profile: 'development', roles: PROFILE_DEFINITIONS.development.roles }) as { warnings: string[] };
+  const result = await codexSetup({ apply: true, dryRun: false }) as { warnings: string[] };
   assert.equal(result.warnings.length, 1);
   const agents = await readFile(resolve(home, '.codex/AGENTS.md'), 'utf8');
   assert.match(agents, /# Personal rules/);
   assert.equal(agents.split('<!-- agent-router:start -->').length - 1, 1);
 });
 
-test('setup backups and rollback restore existing files', async () => {
+test('setup backups and rollback restore existing managed files', async () => {
   const home = await useHome();
   await mkdir(resolve(home, '.codex'), { recursive: true });
+  await mkdir(resolve(home, '.agent-router'), { recursive: true });
   await writeFile(resolve(home, '.codex/agent-router.config.toml'), '# user profile\n');
   await writeFile(resolve(home, '.codex/AGENTS.md'), '# user agents\n');
-  await codexSetup({ apply: true, dryRun: false, profile: 'development', roles: PROFILE_DEFINITIONS.development.roles });
+  await writeFile(resolve(home, '.agent-router/config.yaml'), '{"legacy":true}\n');
+  await codexSetup({ apply: true, dryRun: false });
   await codexSetupRollback();
   assert.equal(await readFile(resolve(home, '.codex/agent-router.config.toml'), 'utf8'), '# user profile\n');
   assert.equal(await readFile(resolve(home, '.codex/AGENTS.md'), 'utf8'), '# user agents\n');
-  assert.equal(await pathExists(resolve(home, '.codex/agents/agent-router-implementation-worker.toml')), false);
+  assert.equal(await readFile(resolve(home, '.agent-router/config.yaml'), 'utf8'), '{"legacy":true}\n');
+  assert.equal(await pathExists(rolePath(home, 'security_researcher')), false);
 });
 
-test('setup rejects an incomplete role set for a selected profile', async () => {
+test('setup status reports structurally valid universal roles', async () => {
   await useHome();
-  await assert.rejects(
-    () => codexSetup({ apply: true, dryRun: false, profile: 'secure-development-external-brain', roles: ['main', 'implementation_worker', 'implementation_escalation_worker'] }),
-    /requires roles: verifier, security_reviewer/,
-  );
+  await codexSetup({ apply: true, dryRun: false });
+  const status = await codexSetupStatus() as { installed_roles: string[]; role_statuses: Record<string, { valid: boolean }> };
+  assert.deepEqual(status.installed_roles, allInstallableRoles());
+  assert.equal(Object.values(status.role_statuses).every((role) => role.valid), true);
 });

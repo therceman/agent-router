@@ -15,7 +15,7 @@ The `prepare` script builds `dist/` automatically before installation from sourc
 ## From an npm tarball
 
 ```bash
-npm install -g ./agent-router-0.6.0-npm.tgz --no-audit --no-fund
+npm install -g ./therceman-agent-router-0.7.0.tgz --no-audit --no-fund
 ```
 
 ## Verify
@@ -25,24 +25,33 @@ agent-router --version
 agent-router profile list
 ```
 
-Expected version: `0.6.0`.
+Expected version: `0.7.0`.
 
 ## Configure Codex
 
 Inspect first:
 
 ```bash
-agent-router setup --provider codex --profile development --dry-run
+agent-router setup --provider codex --dry-run
 ```
 
 Apply:
 
 ```bash
-agent-router setup --provider codex --profile development --apply
+agent-router setup --provider codex --apply
 agent-router doctor --global
 ```
 
-The command safely manages one block in `~/.codex/AGENTS.md`, a named profile in `~/.codex/agent-router.config.toml`, role files under `~/.codex/agents/`, and state under `~/.agent-router/`.
+Machine setup safely manages one block in `~/.codex/AGENTS.md`, a named profile in `~/.codex/agent-router.config.toml`, all built-in role files under `~/.codex/agents/`, and machine state under `~/.agent-router/`. It does not select a project workflow profile.
+
+Select a workflow once per project:
+
+```bash
+cd /path/to/work-repository
+agent-router project register --profile development
+agent-router doctor
+agent-router status
+```
 
 ## Rollback
 

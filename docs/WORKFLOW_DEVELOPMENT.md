@@ -19,7 +19,7 @@ Luna may validate exit codes, changed-file scope, handoff fields, budget use, di
 Setup and registration:
 
 ```bash
-agent-router setup --provider codex --profile development --apply
+agent-router setup --provider codex --apply
 cd /path/to/project
 agent-router project register --profile development
 ```
