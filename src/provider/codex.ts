@@ -11,6 +11,7 @@ import {
   type RoleId,
 } from '../config.js';
 import { GLOBAL_AGENTS_BLOCK } from '../templates.js';
+import { ensureProviderCapabilities } from '../provider-capabilities.js';
 
 function tomlString(value: string): string {
   return JSON.stringify(value);
@@ -164,6 +165,7 @@ export async function codexSetup(options: {
   await ensureDir(paths.reviewPacks);
   await ensureDir(paths.logs);
   await ensureDir(paths.backups);
+  await ensureProviderCapabilities();
   const backups: Array<{ path: string; backup: string | null }> = [];
   for (const file of files) {
     const existing = (await pathExists(file.path)) ? await readFile(file.path, 'utf8') : null;

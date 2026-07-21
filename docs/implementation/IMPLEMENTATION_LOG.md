@@ -1,17 +1,34 @@
-# Agent Router v0.6.0 Implementation Log
+# Agent Router v0.8.0 Implementation Log
 
-## Model efficiency
+## Persistent execution
 
-Default implementation now routes to Luna-xhigh when the task is bounded, well specified, and testable. Terra-high is a distinct escalation worker and remains the correctness verifier. Rejected default implementation receives one Terra-high retry. A second rejection requires architecture review rather than repeated model attempts.
+Sessions are project-bound and keyed by role, provider model, reasoning,
+repository, sandbox, approval policy, and compatibility metadata. A compatible
+idle session returns `send_input`; stale sessions attempt `resume` when
+supported, otherwise a fresh spawn is requested. Transport failures are
+recorded and fail closed.
 
-## Toolchain resilience
+## Command-only worker API
 
-Dependency installation now uses `npm ci --no-audit --no-fund` through `npm run bootstrap`. npm advisory checks are separated into `npm run security:audit`. The package has no runtime dependencies; the release tarball installs from a local file without registry dependency resolution.
+Parent dispatch messages contain only the bounded command:
+
+`Execute:\nagent-router work open|sync|reopen TASK --session SES`
+
+Workers load authoritative task/context state through the CLI and return a
+schema-valid result envelope. Task content is never transported through the
+provider prompt.
+
+## Revisions and migration
+
+Task revision 1 is materialized for legacy v0.7 records. Immutable amendments
+increment revisions and update the effective contract hash. Retry preserves
+rejected evidence, records required changes, and creates a new assignment path.
+The migration command is explicit, idempotent, backed up, and never guesses a
+historical session assignment.
 
 ## Verification
 
-- TypeScript strict typecheck: passed.
-- Production build: passed.
-- Automated test suite: passed.
-- npm package creation: passed.
-- Isolated local-tarball installation: passed.
+The final quality gate passed with 88 tests. The 0.8.0 package installed from a
+local tarball and reported version 0.8.0. Native provider reuse was not claimed
+because no callable native sub-agent transport was exposed in this invocation;
+the provider-neutral lifecycle simulation passed.

@@ -20,12 +20,19 @@ You MAY:
 - create or split bounded tasks;
 - request deterministic routing;
 - request bounded context construction;
-- dispatch one disposable agent;
+- acquire one authorized worker session for one active task;
 - run exact test commands declared by the task;
 - validate exit codes, handoffs, budgets, scope, diff statistics, and secret-scan results;
 - prepare compact implementation or security review packages;
 - read structured handoffs and reviews;
 - accept, reject, block, or escalate results.
+
+Sub-agent transport is command-only. The main session MUST send only the exact
+dispatch message returned by Agent Router session acquire. It MUST NOT include
+task descriptions, acceptance criteria, file paths, source excerpts, tests,
+amendments, review findings, or implementation guidance in provider messages.
+Compatible idle sessions should be reused within policy limits. Current task
+state and revision override all prior worker memory.
 
 The main session performs a mechanical integration gate, not an expert semantic code review.
 Bounded implementation belongs to Luna-xhigh by default; Terra-high handles escalation and correctness verification. Security judgment belongs to Sol. Every required review gate must pass before acceptance.
@@ -39,7 +46,7 @@ export const WORKFLOW_DOC = `# Agent Router Workflow
 4. Main selects one bounded task.
 5. Router applies hard rules and produces an explainable route.
 6. Context builder enforces file and byte budgets.
-7. Luna-xhigh implements one bounded task by default; Terra-high takes over only after explicit escalation and writes a structured handoff.
+7. Luna-xhigh implements one bounded task by default; Terra-high takes over only after explicit escalation and writes a structured handoff. Compatible idle sessions are reused within policy limits.
 8. Main runs only the declared deterministic checks and validates the handoff.
 9. Terra verifier performs ordinary code-correctness review when the profile requires it.
 10. Sol performs focused security review when the profile requires it.
@@ -140,6 +147,7 @@ When Agent Router is active:
 3. The Luna main session is an orchestrator and MUST NOT implement production code.
 4. Use only roles enabled by the current registered project profile.
 5. Delegate bounded implementation to Luna-xhigh. Use Terra-high for explicit escalation and correctness verification. Use Sol only for architecture, security reasoning, authorized security research, or critical review.
+6. Sub-agent dispatch is command-only. Send only the exact dispatch message returned by \`agent-router session acquire\` to provider spawn, send-input, or resume actions. Never include task content in transport.
 6. Luna may run exact declared test commands and mechanical checks, but it must not claim semantic code or security review.
 7. Do not duplicate worker work or repair rejected work in the main session.
 8. Do not perform broad scans or read dependency, generated, archive, binary, Docker, Ghidra, scanner, or cache trees unless the task explicitly permits it.
@@ -148,6 +156,10 @@ When Agent Router is active:
 11. Complete every ordered review gate before task acceptance.
 12. Do not create recursive subagent trees.
 13. Use Agent Router CLI commands for every task transition and record import. Never move, rename, delete, or directly edit canonical files under \`~/.agent-router/projects/\`.
+
+Workers perform one active assignment at a time and accept requirements only
+from \`agent-router work open\`, \`work sync\`, or \`work reopen\`. After completion
+they stop the current turn and wait idle for another command-only assignment.
 
 When Agent Router is not active, these orchestration restrictions do not apply.
 `;

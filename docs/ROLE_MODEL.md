@@ -2,7 +2,7 @@
 
 ## Luna-low main
 
-Long-lived coordinator. It selects one task, bootstraps compact state, delegates, runs declared tests, validates mechanical evidence, and moves state through legal transitions.
+Long-lived coordinator. It selects one task, bootstraps compact state, acquires a compatible worker session, transports only the exact Agent Router command, runs declared tests, validates mechanical evidence, and moves state through legal transitions.
 
 It must not implement code, perform broad exploration, repair worker output, or claim semantic/security review.
 

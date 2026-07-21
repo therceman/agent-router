@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://therceman.dev/agent-router/work-result.schema.json",
+  "title": "Agent Router Worker Result",
+  "type": "object",
+  "required": ["schema_version", "task_id", "task_revision", "session_id", "assignment_id", "role", "result_kind", "payload"],
+  "properties": {"schema_version": {"const": 1}, "task_id": {"type": "string"}, "task_revision": {"type": "integer", "minimum": 1}, "session_id": {"type": "string"}, "assignment_id": {"type": "string"}, "role": {"type": "string", "not": {"const": "main"}}, "result_kind": {"enum": ["implementation_handoff", "verification_review", "security_review", "critical_review", "architecture_decision", "scout_discovery", "repository_hygiene_report", "security_research_result"]}, "payload": {}},
+  "additionalProperties": false
+}

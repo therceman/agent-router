@@ -137,3 +137,8 @@ worker_complete → review_pending → accepted → done
 ```
 
 All required review records must exist, be accepted, and appear in the configured order before `agent-router task accept` succeeds.
+
+In 0.8.0, a dispatched task is assigned through `agent-router session acquire`.
+The worker receives only the generated `work open` or `work reopen` command.
+Task amendments are immutable and increment the task revision; an acknowledged
+worker must use `work sync` before completing against a newer revision.

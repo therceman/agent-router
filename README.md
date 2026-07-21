@@ -124,7 +124,19 @@ Check:
 
 ```bash
 agent-router --version
-# 0.7.0
+# 0.8.0
+
+## Persistent worker sessions
+
+Agent Router 0.8.0 keeps compatible Codex worker sessions idle for bounded
+reuse. Run `agent-router session acquire --task TASK-ID --json`, send only the
+returned command-only dispatch message, and let the worker load canonical state
+with `agent-router work open`. Use `work sync` for amendments and `work reopen`
+for an authorized retry. Sessions remain project- and role-scoped and are
+retired by policy.
+
+The parent session never places task content in provider transport and Agent
+Router never invokes provider-native tools directly.
 ```
 
 ## Configure Codex globally
@@ -427,5 +439,5 @@ npm run bootstrap:offline
 The shipped npm tarball has zero runtime dependencies and can be installed from a local file without registry access:
 
 ```bash
-npm install -g ./therceman-agent-router-0.7.0.tgz --no-audit --no-fund
+npm install -g ./therceman-agent-router-0.8.0.tgz --no-audit --no-fund
 ```

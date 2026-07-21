@@ -12,3 +12,7 @@ maximum tool output    16000 characters
 Broad scans, archives, binaries, dependencies, generated files, Git-ignored files, and recursive delegation are disabled by default.
 
 The context builder resolves real paths and rejects traversal or symlink escape. Contexts are stored under `~/.agent-router`, not in the work repository.
+
+Persistent sessions do not expand task context budgets. Each `work open`, `work
+sync`, and `work reopen` loads bounded canonical context; remembered provider
+conversation is never an authorization source.

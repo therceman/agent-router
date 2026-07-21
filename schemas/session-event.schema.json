@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://therceman.dev/agent-router/session-event.schema.json",
+  "title": "Agent Router Session Event",
+  "type": "object",
+  "required": ["schema_version", "event_id", "project_id", "session_id", "type", "at"],
+  "properties": {"schema_version": {"const": 1}, "event_id": {"type": "string", "minLength": 1}, "project_id": {"type": "string"}, "session_id": {"type": "string"}, "task_id": {"type": "string"}, "assignment_id": {"type": "string"}, "type": {"type": "string", "minLength": 1}, "from_status": {"type": "string"}, "to_status": {"type": "string"}, "at": {"type": "string", "format": "date-time"}, "details": {"type": "object"}},
+  "additionalProperties": false
+}

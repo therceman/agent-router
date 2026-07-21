@@ -9,3 +9,8 @@ export * from './handoff.js';
 export * from './review.js';
 export * from './repo.js';
 export * from './state.js';
+export * from './amendment.js';
+export * from './session.js';
+export * from './work.js';
+export * from './migration.js';
+export * from './provider-capabilities.js';

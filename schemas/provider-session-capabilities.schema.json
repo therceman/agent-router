@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://therceman.dev/agent-router/provider-session-capabilities.schema.json",
+  "title": "Agent Router Provider Session Capabilities",
+  "type": "object",
+  "required": ["provider", "spawn", "send_input", "resume", "close", "wait", "persistent_across_parent_restart", "detected_at", "source"],
+  "properties": {"provider": {"const": "codex"}, "spawn": {"type": "boolean"}, "send_input": {"type": "boolean"}, "resume": {"enum": [true, false, "unknown"]}, "close": {"type": "boolean"}, "wait": {"type": "boolean"}, "persistent_across_parent_restart": {"enum": [true, false, "unknown"]}, "detected_at": {"type": "string", "format": "date-time"}, "source": {"enum": ["configured", "manual-smoke-test", "runtime-observation"]}},
+  "additionalProperties": false
+}

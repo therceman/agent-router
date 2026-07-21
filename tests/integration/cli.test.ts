@@ -11,7 +11,7 @@ test('CLI help and version exit successfully', () => {
   const help = run(process.execPath, [cli, '--help']);
   assert.equal(help.status, 0); assert.match(help.stdout, /Agent Router/);
   const version = run(process.execPath, [cli, '--version']);
-  assert.equal(version.status, 0); assert.match(version.stdout, /0\.7\.0/);
+  assert.equal(version.status, 0); assert.match(version.stdout, /0\.8\.0/);
 });
 
 test('setup is profile-agnostic and project registration retains profile selection', async () => {
