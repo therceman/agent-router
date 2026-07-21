@@ -8,3 +8,5 @@ agent-router plan create --id PLAN-LOCAL-001 --title "Sol plan" --author local-s
 ```
 
 Flow: local Sol plan → Luna → Luna-xhigh bounded implementation / Terra-high escalation → Luna mechanical gate → Terra verifier → Sol security review.
+
+Persistent sessions remain scoped to this project and role. Send only the exact dispatch command returned by session acquisition.

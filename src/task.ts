@@ -7,6 +7,8 @@ import { pathExists, readJson, removeIfExists, writeJson } from './lib/fs.js';
 import { transitionEvent, appendEvent } from './events.js';
 import { routeTask } from './router.js';
 import { resolveProjectRuntime } from './state.js';
+import { canonicalSha256 } from './lib/hash.js';
+import { taskContract, createTaskAmendment } from './amendment.js';
 
 const TASK_EXTENSION = '.json';
 const LEGACY_TASK_EXTENSION = '.yaml';
@@ -51,7 +53,7 @@ export function validateTaskId(taskId: string): void {
 }
 
 export function validateTask(task: TaskRecord): void {
-  if (task.schema_version !== 1) throw new Error('Unsupported task schema version');
+  if (task.schema_version !== 1 && task.schema_version !== 2) throw new Error('Unsupported task schema version');
   validateTaskId(task.task_id);
   if (!task.title.trim() || !task.objective.trim()) throw new Error('Task title and objective are required');
   if (task.superseded_by !== undefined) validateTaskId(task.superseded_by);
@@ -67,6 +69,11 @@ export function validateTask(task: TaskRecord): void {
   if (task.scope.allowed_paths.length > task.budgets.maximum_files_read) throw new Error('Allowed path count exceeds file budget');
   if (!Array.isArray(task.review.required_roles) || !Array.isArray(task.review.sequence)) throw new Error('Task review roles and sequence are required');
   if (task.review.required_roles.join('|') !== task.review.sequence.join('|')) throw new Error('Task review sequence must contain every required role in order');
+  if (task.schema_version === 2) {
+    if (!Number.isInteger(task.revision) || (task.revision ?? 0) < 1) throw new Error('Task revision must be a positive integer');
+    if (task.previous_revision !== null && (!Number.isInteger(task.previous_revision) || (task.previous_revision ?? 0) !== (task.revision ?? 0) - 1)) throw new Error('Task previous revision is invalid');
+    if (!task.effective_contract_sha256 || !/^[a-f0-9]{64}$/.test(task.effective_contract_sha256)) throw new Error('Task effective contract hash is invalid');
+  }
 }
 
 function taskPath(stateRoot: string, state: TaskState, taskId: string): string {
@@ -85,11 +92,22 @@ async function locateTaskCandidates(stateRoot: string, taskId: string): Promise<
 }
 
 async function migrateLegacyTask(path: string, task: TaskRecord): Promise<string> {
-  if (!path.endsWith(LEGACY_TASK_EXTENSION)) return path;
-  const destination = `${path.slice(0, -LEGACY_TASK_EXTENSION.length)}${TASK_EXTENSION}`;
-  if (await pathExists(destination)) throw new Error(`Duplicate task records exist: ${path}, ${destination}`);
-  await writeJson(destination, task);
-  await rm(path, { force: true });
+  let destination = path;
+  if (path.endsWith(LEGACY_TASK_EXTENSION)) {
+    destination = `${path.slice(0, -LEGACY_TASK_EXTENSION.length)}${TASK_EXTENSION}`;
+    if (await pathExists(destination)) throw new Error(`Duplicate task records exist: ${path}, ${destination}`);
+  }
+  if (task.schema_version === 1) {
+    const migrated: TaskRecord = {
+      ...task,
+      schema_version: 2,
+      revision: 1,
+      previous_revision: null,
+      effective_contract_sha256: canonicalSha256(taskContract(task)),
+    };
+    await writeJson(destination, migrated);
+  } else if (destination !== path) await writeJson(destination, task);
+  if (destination !== path) await rm(path, { force: true });
   return destination;
 }
 
@@ -101,7 +119,11 @@ async function locateTask(stateRoot: string, taskId: string): Promise<{ path: st
   const originalPath = candidates[0]!;
   const task = await readJson<TaskRecord>(originalPath);
   const path = await migrateLegacyTask(originalPath, task);
-  return { path, task };
+  const migrated = path === originalPath && task.schema_version === 1
+    ? await readJson<TaskRecord>(path)
+    : task.schema_version === 1 ? await readJson<TaskRecord>(path) : task;
+  validateTask(migrated);
+  return { path, task: migrated };
 }
 
 function requiredReviews(kind: TaskKind, profileRoles: string[]): string[] {
@@ -134,7 +156,7 @@ export async function createTask(input: {
   const definition = PROFILE_DEFINITIONS[runtime.project.profile];
   const reviews = requiredReviews(input.kind, definition.required_review_roles);
   const task: TaskRecord = {
-    schema_version: 1,
+    schema_version: 2,
     task_id: input.id,
     title: input.title,
     profile: runtime.project.profile,
@@ -153,6 +175,9 @@ export async function createTask(input: {
     created_at: now,
     updated_at: now,
   };
+  task.revision = 1;
+  task.previous_revision = null;
+  task.effective_contract_sha256 = canonicalSha256(taskContract(task));
   validateTask(task);
   await writeJson(taskPath(runtime.stateRoot, 'draft', task.task_id), task);
   await appendEvent(runtime.stateRoot, { task_id: task.task_id, type: 'task_created', details: { title: task.title, profile: task.profile, plan_ref: task.plan_ref ?? null } });
@@ -238,14 +263,30 @@ export async function retryTask(taskId: string, cwd?: string): Promise<TaskRecor
   if (task.state === 'rejected' && task.execution?.implementation_tier === 'escalated') {
     throw new Error('Task already used the Terra-high escalation attempt; create an architect review task instead of retrying again.');
   }
+  const rejectedReviews: ReviewRecord[] = [];
+  if (task.state === 'rejected' && await pathExists(resolve(stateRoot, 'reviews', taskId))) {
+    for (const name of (await readdir(resolve(stateRoot, 'reviews', taskId))).filter((item) => item.endsWith('.json')).sort()) rejectedReviews.push(await readJson<ReviewRecord>(resolve(stateRoot, 'reviews', taskId, name)));
+  }
+  const reviewFeedback = rejectedReviews.flatMap((review) => [...(review.findings ?? []), ...(review.required_changes ?? []), ...review.required_followups]);
+  const firstReview = rejectedReviews[0];
+  await createTaskAmendment({
+    taskId, cwd: root, amendmentKind: 'retry', source: 'system',
+    changes: task.state === 'rejected'
+      ? { notes: ['Implementation rejection authorized Terra-high escalation.'], review_feedback: reviewFeedback.length ? [...new Set(reviewFeedback)] : ['Resolve the canonical review findings before completion.'], required_changes: ['Resolve the canonical review findings before completion.'] }
+      : { notes: ['Task retry authorized after a blocked attempt.'] },
+    ...(firstReview ? { sourceReviewRole: firstReview.reviewer.role, sourceReviewSha256: canonicalSha256(firstReview) } : {}),
+  });
+  await import('./session.js').then(({ retireTaskAssignment }) => retireTaskAssignment(taskId, root));
   await removeIfExists(resolve(stateRoot, 'generated', `${taskId}.route.json`));
   await removeIfExists(resolve(stateRoot, 'contexts', `${taskId}.json`));
   await removeIfExists(resolve(stateRoot, 'handoffs', `${taskId}.json`));
-  await removeIfExists(resolve(stateRoot, 'reviews', taskId));
+  if (task.state !== 'rejected') await removeIfExists(resolve(stateRoot, 'reviews', taskId));
   return persistTransition(taskId, 'ready', root, {
     reset_execution_artifacts: true,
     escalated_to_terra: task.state === 'rejected',
   }, (record) => {
+    record.last_assignment_id = undefined;
+    record.last_session_id = undefined;
     const current = record.execution ?? { implementation_tier: 'default' as const, attempt: 1 };
     record.execution = {
       implementation_tier: task.state === 'rejected' ? 'escalated' : current.implementation_tier,

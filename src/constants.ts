@@ -1,4 +1,4 @@
-export const VERSION = '0.7.0';
+export const VERSION = '0.8.0';
 export const AGENTS_START = '<!-- agent-router:start -->';
 export const AGENTS_END = '<!-- agent-router:end -->';
 export const DEFAULT_EXCLUDES = [

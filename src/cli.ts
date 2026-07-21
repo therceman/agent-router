@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { VERSION } from './constants.js';
 import { codexSetup, codexSetupRollback, codexSetupStatus } from './provider/codex.js';
 import {
@@ -24,6 +25,11 @@ import { budgetCheck, budgetShow } from './budget.js';
 import { PROFILE_DEFINITIONS, PROFILE_IDS, allInstallableRoles, globalPaths, parseProfile, parseRoleList } from './config.js';
 import { pathExists, readJson } from './lib/fs.js';
 import { createPlan, getPlan, importPlan, listPlans, type PlanAuthor } from './plan.js';
+import { acquireSession, confirmSession, getSession, listSessions, releaseSession, reconcileSessions, retireSession, sessionStats, sessionStatus, transportFailed } from './session.js';
+import { workBlock, workComplete, workOpen, workRelinquish, workReopen, workStatus, workSync } from './work.js';
+import { createTaskAmendment, getTaskAmendment, listTaskAmendments } from './amendment.js';
+import { migrationCheck, migrateProject } from './migration.js';
+import { providerCapabilities, setProviderCapabilities } from './provider-capabilities.js';
 
 interface ParsedArgs { positional: string[]; flags: Map<string, string[]>; }
 
@@ -111,6 +117,24 @@ Repository and accounting:
   repo inspect | repo diet plan | repo diet apply --plan FILE --destination DIR --confirm ID
   budget show|check ID
   routing stats
+
+Persistent sessions and worker API:
+  session acquire --task TASK [--role ROLE] [--json]
+  session confirm --session SES --action spawn|send-input|resume [--provider-agent-id ID]
+  session transport-failed --session SES --action ACTION --reason CODE [--detail TEXT]
+  session release --session SES --task TASK
+  session retire --session SES --reason REASON [--force]
+  session reconcile [--apply]
+  session list [--retired] [--role ROLE] | show SES | status | stats
+  work open|sync|reopen TASK --session SES
+  work status --session SES
+  work complete TASK --session SES --file RESULT.json
+  work block|relinquish TASK --session SES --reason CODE
+  task amend TASK --file AMENDMENT.json
+  task amendments TASK | amendment TASK --revision N
+  provider capabilities
+  provider capability set --resume true|false|unknown --persistent-across-parent-restart true|false|unknown --source SOURCE
+  migrate --from 0.7.0 --to 0.8.0 [--check|--apply]
 `;
 
 const SETUP_HELP = `Usage:
@@ -182,6 +206,9 @@ async function globalDoctor(): Promise<Record<string, unknown>> {
     { name: 'installed_roles', ok: rolesComplete, detail: rolesComplete ? expectedRoles.join(', ') : `expected: ${expectedRoles.join(', ')}` },
     { name: 'codex_main_profile', ok: Boolean(status.main_profile_valid), detail: String(status.profile_path) },
     { name: 'custom_agents', ok: missingAgents.length === 0 && invalidRoleFiles.length === 0, detail: missingAgents.length ? `missing: ${missingAgents.join(', ')}` : invalidRoleFiles.length ? `invalid: ${invalidRoleFiles.join(', ')}` : expectedAgents.join(', ') },
+    { name: 'session_schemas', ok: (await pathExists(resolve(fileURLToPath(new URL('../schemas', import.meta.url)), 'session.schema.json')) || await pathExists(resolve(process.cwd(), 'schemas/session.schema.json'))) && (await pathExists(resolve(fileURLToPath(new URL('../schemas', import.meta.url)), 'assignment.schema.json')) || await pathExists(resolve(process.cwd(), 'schemas/assignment.schema.json'))) && (await pathExists(resolve(fileURLToPath(new URL('../schemas', import.meta.url)), 'session-event.schema.json')) || await pathExists(resolve(process.cwd(), 'schemas/session-event.schema.json'))), detail: 'session, assignment, and session-event schemas shipped' },
+    { name: 'provider_capabilities', ok: await providerCapabilities().then(() => true).catch(() => false), detail: resolve(paths.root, 'providers/codex-capabilities.json') },
+    { name: 'command_only_protocol', ok: (await readFile(resolve(paths.codexHome, 'AGENTS.md'), 'utf8').catch(() => '')).includes('command-only'), detail: 'generated global instructions require command-only dispatch' },
   ];
   return { ok: checks.every((check) => check.ok), checks, provider: status };
 }
@@ -248,9 +275,33 @@ async function main(): Promise<number> {
   }
   if (command === 'eject') { print(await ejectProject({ cwd: projectCwd, dryRun: bool(parsed, 'dry-run') }), json); return 0; }
 
+  if (command === 'provider') {
+    const sub = required(parsed.positional[0], 'provider subcommand');
+    if (sub === 'capabilities') { print(await providerCapabilities(), json); return 0; }
+    if (sub === 'capability' && parsed.positional[1] === 'set') {
+      const parseCapability = (name: string): boolean | 'unknown' => { const value = required(flag(parsed, name), `--${name}`); if (value === 'true') return true; if (value === 'false') return false; if (value === 'unknown') return 'unknown'; throw new Error(`Invalid ${name}: ${value}`); };
+      print(await setProviderCapabilities({ resume: parseCapability('resume'), persistent_across_parent_restart: parseCapability('persistent-across-parent-restart'), source: required(flag(parsed, 'source'), '--source') as 'configured' | 'manual-smoke-test' | 'runtime-observation' }), json); return 0;
+    }
+    throw new Error(`Unknown provider subcommand: ${sub}`);
+  }
+
+  if (command === 'migrate') {
+    const result = await migrateProject({ cwd: projectCwd, from: flag(parsed, 'from', '0.7.0'), to: flag(parsed, 'to', VERSION), check: bool(parsed, 'check'), apply: bool(parsed, 'apply') }); print(result, json); return 0;
+  }
+
   if (command === 'session') {
     const sub = required(parsed.positional[0], 'session subcommand');
     if (sub === 'bootstrap') { print(await bootstrapSession(projectCwd), true); return 0; }
+    if (sub === 'acquire') { print(await acquireSession(required(flag(parsed, 'task'), '--task'), projectCwd, flag(parsed, 'role') as import('./config.js').RoleId | undefined), json); return 0; }
+    if (sub === 'confirm') { print(await confirmSession({ sessionId: required(flag(parsed, 'session'), '--session'), action: required(flag(parsed, 'action'), '--action') as 'spawn' | 'send-input' | 'resume', providerAgentId: flag(parsed, 'provider-agent-id'), cwd: projectCwd }), json); return 0; }
+    if (sub === 'transport-failed') { print(await transportFailed({ sessionId: required(flag(parsed, 'session'), '--session'), action: required(flag(parsed, 'action'), '--action') as 'spawn' | 'send-input' | 'resume', reason: required(flag(parsed, 'reason'), '--reason'), detail: flag(parsed, 'detail'), cwd: projectCwd }), json); return 0; }
+    if (sub === 'release') { print(await releaseSession({ sessionId: required(flag(parsed, 'session'), '--session'), taskId: required(flag(parsed, 'task'), '--task'), cwd: projectCwd }), json); return 0; }
+    if (sub === 'retire') { print(await retireSession({ sessionId: required(flag(parsed, 'session'), '--session'), reason: required(flag(parsed, 'reason'), '--reason') as import('./models.js').SessionRetireReason, force: bool(parsed, 'force'), cwd: projectCwd }), json); return 0; }
+    if (sub === 'reconcile') { print(await reconcileSessions(projectCwd, bool(parsed, 'apply')), json); return 0; }
+    if (sub === 'list') { print(await listSessions(projectCwd, { retired: bool(parsed, 'retired'), role: flag(parsed, 'role') as import('./config.js').RoleId | undefined }), json); return 0; }
+    if (sub === 'show') { print(await getSession(required(parsed.positional[1], 'session ID'), projectCwd), json); return 0; }
+    if (sub === 'status') { print(await sessionStatus(projectCwd), json); return 0; }
+    if (sub === 'stats') { print(await sessionStats(projectCwd), json); return 0; }
     throw new Error(`Unknown session subcommand: ${sub}`);
   }
 
@@ -311,11 +362,30 @@ async function main(): Promise<number> {
     if (sub === 'dispatch') { print(await dispatchTask(required(id, 'task ID'), projectCwd), json); return 0; }
     if (sub === 'start') { print(await startTask(required(id, 'task ID'), projectCwd), json); return 0; }
     if (sub === 'retry') { print(await retryTask(required(id, 'task ID'), projectCwd), json); return 0; }
+    if (sub === 'amend') {
+      const input = await readJson<import('./models.js').TaskAmendmentRecord>(required(flag(parsed, 'file'), '--file'));
+      if (!input.amendment_kind || !input.source || !input.changes) throw new Error('Amendment input must contain amendment_kind, source, and changes');
+      print(await createTaskAmendment({ taskId: required(id, 'task ID'), cwd: projectCwd, amendmentKind: input.amendment_kind, source: input.source, changes: input.changes, sourceReviewRole: input.source_review_role, sourceReviewSha256: input.source_review_sha256 }), json); return 0;
+    }
+    if (sub === 'amendments') { print(await listTaskAmendments(required(id, 'task ID'), projectCwd), json); return 0; }
+    if (sub === 'amendment') { print(await getTaskAmendment(required(id, 'task ID'), Number(required(flag(parsed, 'revision'), '--revision')), projectCwd), json); return 0; }
     if (sub === 'supersede') { print(await supersedeTask(required(id, 'task ID'), required(flag(parsed, 'by'), '--by'), projectCwd), json); return 0; }
     if (sub === 'block') { print(await transitionTask(required(id, 'task ID'), 'blocked', projectCwd), json); return 0; }
     if (sub === 'cancel') { print(await transitionTask(required(id, 'task ID'), 'cancelled', projectCwd), json); return 0; }
     if (sub === 'accept') { print(await acceptTask(required(id, 'task ID'), projectCwd), json); return 0; }
     throw new Error(`Unknown task subcommand: ${sub}`);
+  }
+
+  if (command === 'work') {
+    const sub = required(parsed.positional[0], 'work subcommand'); const id = parsed.positional[1] ?? flag(parsed, 'task'); const sessionId = required(flag(parsed, 'session'), '--session');
+    if (sub === 'open') { print(await workOpen(required(id, 'task ID'), sessionId, projectCwd), json); return 0; }
+    if (sub === 'sync') { print(await workSync(required(id, 'task ID'), sessionId, projectCwd), json); return 0; }
+    if (sub === 'reopen') { print(await workReopen(required(id, 'task ID'), sessionId, projectCwd), json); return 0; }
+    if (sub === 'status') { print(await workStatus(sessionId, projectCwd), json); return 0; }
+    if (sub === 'complete') { print(await workComplete(required(id, 'task ID'), sessionId, required(flag(parsed, 'file'), '--file'), projectCwd), json); return 0; }
+    if (sub === 'block') { print(await workBlock(required(id, 'task ID'), sessionId, required(flag(parsed, 'reason'), '--reason'), projectCwd), json); return 0; }
+    if (sub === 'relinquish') { print(await workRelinquish(required(id, 'task ID'), sessionId, required(flag(parsed, 'reason'), '--reason'), projectCwd), json); return 0; }
+    throw new Error(`Unknown work subcommand: ${sub}`);
   }
 
   if (command === 'route') {

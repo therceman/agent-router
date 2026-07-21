@@ -61,7 +61,7 @@ Project identity is based on normalized Git remote plus a hash. Machine-specific
 3. The selected project profile determines planning brain, permitted roles, and ordered review gates.
 4. Router classifies one bounded task using typed properties and deterministic hard rules.
 5. Context builder enforces path and byte budgets.
-6. A disposable worker performs one task.
+6. A project- and role-scoped worker session performs one active task at a time and may remain idle for bounded reuse.
 7. Worker writes a structured handoff under `~/.agent-router`.
 8. Luna runs only declared deterministic checks and validates mechanics.
 9. Required independent reviewers run in order.

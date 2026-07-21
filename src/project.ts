@@ -148,6 +148,24 @@ export async function doctorProject(cwd?: string): Promise<{
   add('codex_agents_available', missingAgents.length === 0 && missingInstalledRoles.length === 0, missingAgents.length ? `missing files: ${missingAgents.join(', ')}` : missingInstalledRoles.length ? `missing global roles: ${missingInstalledRoles.join(', ')}` : expectedAgents.join(', '));
   const sync = await syncProject({ cwd: runtime.repoRoot, check: true });
   add('managed_files_current', (sync as { current: boolean }).current, `${((sync as { stale: string[] }).stale).length} stale`);
+  const policy = await readJson<Record<string, unknown>>(resolve(runtime.stateRoot, 'policy.yaml')).catch(() => ({} as Record<string, unknown>));
+  const sessionPolicy = policy.session_policy as { enabled?: boolean; maximum_parallel_tasks_per_session?: number } | undefined;
+  add('session_policy', sessionPolicy?.enabled === true && sessionPolicy.maximum_parallel_tasks_per_session === 1, 'Session policy is enabled with one active task per session');
+  for (const dir of ['sessions/active', 'sessions/retired', 'assignments/active', 'assignments/history', 'tasks/amendments', 'locks']) add(`state_directory_${dir.replaceAll('/', '_')}`, await pathExists(resolve(runtime.stateRoot, dir)), resolve(runtime.stateRoot, dir));
+  const assignmentCheck = await import('./session.js').then(({ reconcileSessions }) => reconcileSessions(runtime.repoRoot, false)).catch((error) => ({ ok: false, checks: [{ code: 'session_reconcile', ok: false, detail: (error as Error).message }] }));
+  add('session_assignment_consistency', Boolean(assignmentCheck.ok), 'Session and assignment state is consistent');
+  const revisionErrors: string[] = [];
+  for (const dir of ['draft', 'ready', 'active', 'review', 'blocked', 'done', 'cancelled']) {
+    const taskDir = resolve(runtime.stateRoot, 'tasks', dir); if (!(await pathExists(taskDir))) continue;
+    for (const name of (await readdir(taskDir)).filter((item) => item.endsWith('.json'))) {
+      try {
+        const task = await readJson<import('./models.js').TaskRecord>(resolve(taskDir, name));
+        if (task.schema_version === 2) { const amendments = await import('./amendment.js').then(({ loadAmendments }) => loadAmendments(runtime.stateRoot, task.task_id)); await import('./amendment.js').then(({ materializeEffectiveTaskContract }) => materializeEffectiveTaskContract(task, amendments)); }
+        else revisionErrors.push(`${name}: legacy schema v1 requires migration`);
+      } catch (error) { revisionErrors.push(`${name}: ${(error as Error).message}`); }
+    }
+  }
+  add('task_revision_integrity', revisionErrors.length === 0, revisionErrors.length ? revisionErrors.join('; ') : 'Task revisions and amendment chains are valid');
   return { ok: checks.filter((c) => c.severity !== 'warning').every((c) => c.ok), checks };
 }
 

@@ -8,3 +8,5 @@ agent-router plan import --id PLAN-001 --author external-chatgpt --file plan.md
 ```
 
 Flow: ChatGPT plan → Luna → Luna-xhigh bounded implementation / Terra-high escalation → Luna mechanical gate → Terra verifier → Sol security review.
+
+Use command-only session acquisition; workers load the plan, context, and current revision through `work open`, `work sync`, and `work reopen`.

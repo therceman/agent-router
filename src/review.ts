@@ -54,6 +54,7 @@ export async function importReview(taskId: string, reviewFile: string, cwd?: str
   await writeJson(resolve(stateRoot, 'reviews', taskId, `${role}.json`), review);
   if (review.verdict === 'rejected') {
     await transitionTask(taskId, 'rejected', root, { verdict: review.verdict, role });
+    if (task.last_session_id) await import('./session.js').then(({ markSessionRejected }) => markSessionRejected(task.last_session_id!, root));
   } else if (review.verdict === 'blocked' || review.verdict === 'architect_review_required' || review.verdict === 'critical_review_required') {
     await transitionTask(taskId, 'blocked', root, { verdict: review.verdict, role });
   } else if (task.state === 'worker_complete') {

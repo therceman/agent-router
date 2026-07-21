@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://therceman.dev/agent-router/session-policy.schema.json",
+  "title": "Agent Router Session Policy",
+  "type": "object",
+  "required": ["enabled", "maximum_tasks_per_session", "maximum_failed_tasks", "maximum_rejected_tasks", "maximum_idle_minutes", "retire_after_implementation_rejection", "reuse_across_projects", "reuse_across_roles", "maximum_parallel_tasks_per_session", "overflow_sessions", "role_policies"],
+  "properties": {"enabled": {"const": true}, "maximum_tasks_per_session": {"type": "integer", "minimum": 1}, "maximum_failed_tasks": {"type": "integer", "minimum": 0}, "maximum_rejected_tasks": {"type": "integer", "minimum": 0}, "maximum_idle_minutes": {"type": "integer", "minimum": 1}, "retire_after_implementation_rejection": {"type": "boolean"}, "reuse_across_projects": {"const": false}, "reuse_across_roles": {"const": false}, "maximum_parallel_tasks_per_session": {"const": 1}, "overflow_sessions": {"type": "object", "required": ["enabled", "maximum_per_role", "persistent"], "properties": {"enabled": {"type": "boolean"}, "maximum_per_role": {"type": "integer", "minimum": 0}, "persistent": {"const": false}}, "additionalProperties": false}, "role_policies": {"type": "object"}},
+  "additionalProperties": false
+}

@@ -1,4 +1,4 @@
-import type { ProfileId } from './config.js';
+import type { ProfileId, RoleId } from './config.js';
 
 export type TaskKind =
   | 'orchestration'
@@ -58,7 +58,7 @@ export interface TaskBudgets {
 }
 
 export interface TaskRecord {
-  schema_version: 1;
+  schema_version: 1 | 2;
   task_id: string;
   title: string;
   profile: ProfileId;
@@ -81,6 +81,30 @@ export interface TaskRecord {
   review: { required: boolean; required_roles: string[]; sequence: string[] };
   created_at: string;
   updated_at: string;
+  /** v0.8 revision fields are optional in the type so v0.7 fixtures can be read before migration. */
+  revision?: number;
+  previous_revision?: number | null;
+  latest_amendment_id?: string;
+  effective_contract_sha256?: string;
+  last_assignment_id?: string;
+  last_session_id?: string;
+  legacy_unassigned?: boolean;
+}
+
+export interface TaskContract {
+  task_id: string;
+  title: string;
+  profile: ProfileId;
+  objective: string;
+  plan_ref?: string;
+  task_profile: TaskProfile;
+  scope: TaskScope;
+  budgets: TaskBudgets;
+  acceptance: string[];
+  tests: { targeted: string[]; checkpoint: string[] };
+  manual_verification: string[];
+  outputs: string[];
+  review: { required: boolean; required_roles: string[]; sequence: string[] };
 }
 
 export interface RouteRecord {
@@ -145,6 +169,10 @@ export interface HandoffRecord {
   known_risks: string[];
   unresolved_questions: string[];
   recommended_next_action: string;
+  session_id?: string;
+  assignment_id?: string;
+  task_revision?: number;
+  effective_contract_sha256?: string;
 }
 
 export type ReviewVerdict =
@@ -181,4 +209,152 @@ export interface EventRecord {
   to_state?: TaskState;
   at: string;
   details?: Record<string, unknown>;
+}
+
+export type SessionStatus =
+  | 'pending_spawn' | 'idle' | 'reserved' | 'busy' | 'stale' | 'retiring' | 'retired' | 'failed';
+
+export type SessionRetireReason =
+  | 'explicit' | 'task_limit' | 'failure_limit' | 'idle_timeout' | 'implementation_rejected'
+  | 'scope_violation' | 'handoff_validation_failed' | 'model_changed' | 'reasoning_changed'
+  | 'role_changed' | 'repository_changed' | 'sandbox_changed' | 'approval_policy_changed'
+  | 'provider_agent_unavailable' | 'resume_failed' | 'session_corrupt' | 'project_unbound'
+  | 'project_ejected' | 'campaign_complete' | 'critical_freshness_policy';
+
+export interface SessionRecord {
+  schema_version: 1;
+  session_id: string;
+  project_id: string;
+  provider: 'codex';
+  provider_agent_id?: string;
+  role: RoleId;
+  model_class: 'cheap' | 'balanced' | 'expert';
+  provider_model: string;
+  reasoning: 'low' | 'medium' | 'high' | 'xhigh';
+  repository_root: string;
+  sandbox_mode: 'read-only' | 'workspace-write';
+  approval_policy: string;
+  status: SessionStatus;
+  current_assignment_id?: string;
+  assigned_task?: string;
+  assigned_revision?: number;
+  acknowledged_revision?: number;
+  compatibility_key: string;
+  tasks_completed: number;
+  failed_tasks: number;
+  rejected_tasks: number;
+  created_at: string;
+  updated_at: string;
+  last_used_at: string;
+  idle_since?: string;
+  lease_expires_at?: string;
+  retire_reason?: SessionRetireReason;
+  retired_at?: string;
+  last_transport_action?: 'spawn' | 'send_input' | 'resume';
+  last_transport_result?: 'pending' | 'succeeded' | 'failed';
+  last_transport_error?: string;
+}
+
+export type AssignmentStatus =
+  | 'pending_transport' | 'transport_confirmed' | 'acknowledged' | 'completed'
+  | 'blocked' | 'relinquished' | 'stale' | 'cancelled';
+
+export interface AssignmentRecord {
+  schema_version: 1;
+  assignment_id: string;
+  project_id: string;
+  task_id: string;
+  task_revision: number;
+  session_id: string;
+  role: RoleId;
+  route_sha256: string;
+  context_sha256: string;
+  transport_action: 'spawn' | 'send_input' | 'resume';
+  provider_agent_id?: string;
+  dispatch_command: string;
+  dispatch_message: string;
+  status: AssignmentStatus;
+  created_at: string;
+  updated_at: string;
+  transport_confirmed_at?: string;
+  acknowledged_at?: string;
+  completed_at?: string;
+  failure_code?: string;
+  failure_detail?: string;
+}
+
+export interface TaskAmendmentRecord {
+  schema_version: 1;
+  amendment_id: string;
+  task_id: string;
+  from_revision: number;
+  to_revision: number;
+  amendment_kind: 'owner_change' | 'scope_change' | 'acceptance_change' | 'test_change' | 'review_feedback' | 'retry' | 'clarification';
+  source: 'owner' | 'external_chatgpt' | 'main' | 'verifier' | 'security_reviewer' | 'critical_reviewer' | 'system';
+  changes: {
+    objective?: string;
+    allowed_paths_add?: string[]; allowed_paths_remove?: string[];
+    forbidden_paths_add?: string[]; forbidden_paths_remove?: string[];
+    acceptance_add?: string[]; acceptance_remove?: string[];
+    targeted_tests_add?: string[]; targeted_tests_remove?: string[];
+    checkpoint_tests_add?: string[]; checkpoint_tests_remove?: string[];
+    manual_verification_add?: string[]; manual_verification_remove?: string[];
+    review_feedback?: string[]; required_changes?: string[]; notes?: string[];
+  };
+  source_review_role?: string;
+  source_review_sha256?: string;
+  previous_contract_sha256: string;
+  resulting_contract_sha256: string;
+  created_at: string;
+}
+
+export interface SessionEventRecord {
+  schema_version: 1;
+  event_id: string;
+  project_id: string;
+  session_id: string;
+  task_id?: string;
+  assignment_id?: string;
+  type: string;
+  from_status?: SessionStatus;
+  to_status?: SessionStatus;
+  at: string;
+  details?: Record<string, unknown>;
+}
+
+export interface SessionPolicy {
+  enabled: true;
+  maximum_tasks_per_session: number;
+  maximum_failed_tasks: number;
+  maximum_rejected_tasks: number;
+  maximum_idle_minutes: number;
+  retire_after_implementation_rejection: boolean;
+  reuse_across_projects: false;
+  reuse_across_roles: false;
+  maximum_parallel_tasks_per_session: 1;
+  overflow_sessions: { enabled: boolean; maximum_per_role: number; persistent: false };
+  role_policies: Partial<Record<RoleId, { persistent: boolean; maximum_tasks_per_session?: number; maximum_idle_minutes?: number; fresh_session_required?: boolean }>>;
+}
+
+export interface WorkResultEnvelope {
+  schema_version: 1;
+  task_id: string;
+  task_revision: number;
+  session_id: string;
+  assignment_id: string;
+  role: RoleId;
+  result_kind: 'implementation_handoff' | 'verification_review' | 'security_review' | 'critical_review' | 'architecture_decision' | 'scout_discovery' | 'repository_hygiene_report' | 'security_research_result';
+  payload: unknown;
+}
+
+export interface ProviderSessionCapabilities {
+  provider: 'codex';
+  spawn: boolean;
+  send_input: boolean;
+  resume: boolean | 'unknown';
+  close: boolean;
+  wait: boolean;
+  persistent_across_parent_restart: boolean | 'unknown';
+  detected_at: string;
+  source: 'configured' | 'manual-smoke-test' | 'runtime-observation';
 }

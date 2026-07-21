@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.0
+
+- Added persistent, project- and role-scoped worker sessions with bounded reuse.
+- Added command-only dispatch, worker-scoped work commands, task revisions, immutable amendments, reconciliation, migration, provider capability metadata, and session statistics.
+
 ## 0.7.0
 
 ### Changed

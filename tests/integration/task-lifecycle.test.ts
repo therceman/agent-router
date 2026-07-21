@@ -123,7 +123,8 @@ test('task retry supports rejected state and preserves append-only transition hi
   const after = afterText.trim().split('\n').length;
 
   assert.equal(retried.state, 'ready');
-  assert.equal(after, before + 1);
+  assert.equal(after, before + 2);
+  assert.match(afterText, /"type":"task_amended"/);
   assert.match(afterText, /"from_state":"rejected","to_state":"ready"/);
 });
 

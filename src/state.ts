@@ -160,10 +160,13 @@ async function createStateDirectories(stateRoot: string): Promise<void> {
     'plans',
     'tasks/draft', 'tasks/ready', 'tasks/active', 'tasks/review', 'tasks/blocked', 'tasks/done', 'tasks/cancelled',
     'contexts', 'handoffs', 'reviews', 'events', 'generated', 'manifests', 'runtime', 'roles', 'logs',
+    'tasks/amendments', 'sessions/active', 'sessions/retired', 'assignments/active', 'assignments/history', 'locks',
   ];
   for (const dir of directories) await ensureDir(resolve(stateRoot, dir));
   const events = resolve(stateRoot, 'events/events.jsonl');
   if (!(await pathExists(events))) await atomicWrite(events, '');
+  const sessionEvents = resolve(stateRoot, 'sessions/events.jsonl');
+  if (!(await pathExists(sessionEvents))) await atomicWrite(sessionEvents, '');
 }
 
 export async function writeRuntimeFiles(stateRoot: string, profile: ProfileId, roles: RoleId[]): Promise<void> {
@@ -321,6 +324,16 @@ export async function bootstrapSession(cwd?: string): Promise<Record<string, unk
   const plansDir = resolve(runtime.stateRoot, 'plans');
   const plans = (await pathExists(plansDir)) ? (await readdir(plansDir)).filter((name) => name.endsWith('.json')).sort().map((name) => name.slice(0, -5)) : [];
   const definition = PROFILE_DEFINITIONS[runtime.project.profile];
+  const storedPolicy = await readJson<Record<string, unknown>>(resolve(runtime.stateRoot, 'policy.yaml')).catch(() => policyForProfile(runtime.project.profile));
+  const sessionPolicy = (storedPolicy.session_policy ?? policyForProfile(runtime.project.profile).session_policy) as { enabled: boolean; maximum_tasks_per_session: number };
+  const sessionCounts: Record<string, number> = { idle: 0, busy: 0, stale: 0 };
+  const activeSessionsDir = resolve(runtime.stateRoot, 'sessions/active');
+  if (await pathExists(activeSessionsDir)) {
+    for (const name of (await readdir(activeSessionsDir)).filter((item) => item.endsWith('.json'))) {
+      try { const record = await readJson<{ status?: string }>(resolve(activeSessionsDir, name)); if (record.status && Object.hasOwn(sessionCounts, record.status)) sessionCounts[record.status] = (sessionCounts[record.status] ?? 0) + 1; } catch { /* doctor/reconcile reports corrupt records */ }
+    }
+  }
+  const requiredAction = nextTask ? (await pathExists(resolve(runtime.stateRoot, 'generated', `${nextTask}.route.json`)) ? (await pathExists(resolve(runtime.stateRoot, 'contexts', `${nextTask}.json`)) ? (await pathExists(resolve(runtime.stateRoot, 'tasks/active', `${nextTask}.json`)) ? 'acquire' : 'dispatch') : 'context') : 'route') : 'none';
   const repoFootprint = {
     agent_router_dir: await pathExists(resolve(runtime.repoRoot, '.agent-router')),
     codex_dir: await pathExists(resolve(runtime.repoRoot, '.codex')),
@@ -351,5 +364,8 @@ export async function bootstrapSession(cwd?: string): Promise<Record<string, unk
     profile_contract: resolve(runtime.stateRoot, 'runtime/PROFILE.md'),
     policy: resolve(runtime.stateRoot, 'policy.yaml'),
     instruction,
+    session_policy: { enabled: sessionPolicy.enabled, maximum_tasks_per_session: sessionPolicy.maximum_tasks_per_session },
+    active_sessions: sessionCounts,
+    required_action: requiredAction,
   };
 }

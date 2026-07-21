@@ -8,3 +8,5 @@ agent-router plan import --id RESEARCH-PLAN-001 --author owner --file authorized
 ```
 
 Flow: authorized plan → Luna → Terra scout → Sol researcher → Terra evidence verification → Sol security review, with critical escalation only when required.
+
+Research workers receive only command-only Agent Router dispatches and retain the same bounded authorization scope across revision syncs.

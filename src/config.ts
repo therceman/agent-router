@@ -1,5 +1,6 @@
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
+import type { SessionPolicy } from './models.js';
 
 export interface GlobalPaths {
   root: string;
@@ -73,7 +74,7 @@ export const ROLE_METADATA: Record<RoleId, {
   main: {
     name: 'agent_router_main',
     description: 'Long-lived Luna-low orchestration session. Never implements production code.',
-    developer_instructions: 'Orchestrate only. Do not implement production code, perform broad scans, duplicate worker work, or repair rejected work. Use bounded tasks and structured handoffs.',
+    developer_instructions: 'Orchestrate only. Do not implement production code, perform broad scans, duplicate worker work, or repair rejected work. Use bounded tasks and structured handoffs. Dispatch workers only with the exact command-only message returned by Agent Router session acquire.',
     sandbox_mode: 'read-only',
   },
   repo_janitor: {
@@ -91,25 +92,25 @@ export const ROLE_METADATA: Record<RoleId, {
   implementation_worker: {
     name: 'agent_router_implementation_worker',
     description: 'Default Luna-xhigh bounded TDD implementation agent.',
-    developer_instructions: 'Implement exactly one bounded, well-specified task using TDD. Modify only allowed paths, run targeted tests, perform required manual checks, write a structured handoff, and stop. Do not delegate recursively. If the task exceeds scope, requires broad context, becomes security-sensitive, or fails verification, stop and request Terra-high escalation instead of repeatedly retrying.',
+    developer_instructions: 'Perform one active assignment at a time. Accept requirements only from agent-router work open, work sync, or work reopen. Implement exactly one bounded, well-specified task using TDD. Modify only allowed paths, run targeted tests, write a structured handoff, complete through Agent Router, then stop the current turn and wait idle for another command-only assignment. Do not delegate recursively.',
     sandbox_mode: 'workspace-write',
   },
   implementation_escalation_worker: {
     name: 'agent_router_implementation_escalation_worker',
     description: 'Terra-high implementation escalation agent for risky, broad, ambiguous, or rejected work.',
-    developer_instructions: 'Implement exactly one escalated engineering task using TDD. Use the prior task, failure evidence, verifier feedback, and bounded context. Modify only allowed paths, run targeted tests, write a structured handoff, and stop. Do not delegate recursively.',
+    developer_instructions: 'Perform one active assignment at a time. Accept requirements only from agent-router work open, work sync, or work reopen. Implement exactly one escalated engineering task using TDD. Use canonical Agent Router state for prior failure evidence and review feedback. Modify only allowed paths, complete through Agent Router, then stop and wait idle. Do not delegate recursively.',
     sandbox_mode: 'workspace-write',
   },
   verifier: {
     name: 'agent_router_verifier',
     description: 'Independent Terra-high implementation verifier.',
-    developer_instructions: 'Review code correctness, behavior regressions, test quality, scope, and handoff evidence. Do not fix implementation. Return one explicit verdict. Do not substitute for the Sol security reviewer.',
+    developer_instructions: 'Perform one active assignment at a time and accept requirements only from Agent Router work commands. Review code correctness, behavior regressions, test quality, scope, and handoff evidence. Do not fix implementation. Return one explicit verdict and wait idle. Do not substitute for the Sol security reviewer.',
     sandbox_mode: 'read-only',
   },
   architect: {
     name: 'agent_router_architect',
     description: 'Sol-high local planning and architecture brain.',
-    developer_instructions: 'Create or review a bounded implementation plan, resolve architecture questions, and return explicit decisions and acceptance criteria. Do not perform the implementation.',
+    developer_instructions: 'Perform one active assignment at a time and accept requirements only from Agent Router work commands. Create or review a bounded implementation plan, resolve architecture questions, and return explicit decisions and acceptance criteria. Do not perform the implementation.',
     sandbox_mode: 'read-only',
   },
   security_reviewer: {
@@ -259,5 +260,43 @@ export function policyForProfile(profile: ProfileId): Record<string, unknown> {
       requires_plan: definition.requires_plan,
       review_pack_purpose: definition.review_pack_purpose,
     },
+    session_policy: defaultSessionPolicy(),
   };
+}
+
+export function defaultSessionPolicy(): SessionPolicy {
+  return {
+    enabled: true,
+    maximum_tasks_per_session: 8,
+    maximum_failed_tasks: 1,
+    maximum_rejected_tasks: 1,
+    maximum_idle_minutes: 120,
+    retire_after_implementation_rejection: true,
+    reuse_across_projects: false,
+    reuse_across_roles: false,
+    maximum_parallel_tasks_per_session: 1,
+    overflow_sessions: { enabled: false, maximum_per_role: 1, persistent: false },
+    role_policies: {
+      repo_janitor: { persistent: false, fresh_session_required: true },
+      critical_reviewer: { persistent: false, fresh_session_required: true },
+      scout: { persistent: true, maximum_tasks_per_session: 4, maximum_idle_minutes: 60 },
+      implementation_escalation_worker: { persistent: true, maximum_tasks_per_session: 2 },
+    },
+  };
+}
+
+export function sessionPolicyForRole(policy: SessionPolicy, role: RoleId): SessionPolicy['role_policies'][RoleId] {
+  return policy.role_policies[role];
+}
+
+export function validateSessionPolicy(policy: SessionPolicy): void {
+  if (policy.enabled !== true || !Number.isInteger(policy.maximum_tasks_per_session) || policy.maximum_tasks_per_session < 1 || !Number.isInteger(policy.maximum_failed_tasks) || policy.maximum_failed_tasks < 0 || !Number.isInteger(policy.maximum_rejected_tasks) || policy.maximum_rejected_tasks < 0 || !Number.isInteger(policy.maximum_idle_minutes) || policy.maximum_idle_minutes < 1) throw new Error('Invalid session policy limits');
+  if (policy.reuse_across_projects !== false || policy.reuse_across_roles !== false || policy.maximum_parallel_tasks_per_session !== 1) throw new Error('Session policy violates project/role/parallel reuse boundaries');
+  if (!policy.overflow_sessions || typeof policy.overflow_sessions.enabled !== 'boolean' || !Number.isInteger(policy.overflow_sessions.maximum_per_role) || policy.overflow_sessions.maximum_per_role < 0 || policy.overflow_sessions.persistent !== false) throw new Error('Invalid overflow session policy');
+  if (!policy.role_policies || typeof policy.role_policies !== 'object') throw new Error('Invalid role session policies');
+  for (const [role, rolePolicy] of Object.entries(policy.role_policies)) {
+    if (!ROLE_IDS.includes(role as RoleId) || !rolePolicy || typeof rolePolicy.persistent !== 'boolean') throw new Error(`Invalid role session policy: ${role}`);
+    if (rolePolicy.maximum_tasks_per_session !== undefined && (!Number.isInteger(rolePolicy.maximum_tasks_per_session) || rolePolicy.maximum_tasks_per_session < 1)) throw new Error(`Invalid role task limit: ${role}`);
+    if (rolePolicy.maximum_idle_minutes !== undefined && (!Number.isInteger(rolePolicy.maximum_idle_minutes) || rolePolicy.maximum_idle_minutes < 1)) throw new Error(`Invalid role idle limit: ${role}`);
+  }
 }
