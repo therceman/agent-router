@@ -5,8 +5,8 @@
   "required": ["schema_version", "task_id", "status", "agent", "files_read", "files_changed", "tests", "manual_checks", "budget", "known_risks", "unresolved_questions"],
   "properties": {
     "schema_version": { "const": 1 },
-    "status": { "const": "worker_complete" },
-    "tests": { "type": "array", "minItems": 1 }
+    "status": { "const": "worker_complete" }, "agent": { "type": "object", "required": ["role", "model_class", "provider_model", "reasoning"], "properties": { "role": { "type": "string" }, "model_class": { "type": "string" }, "provider_model": { "type": "string" }, "reasoning": { "type": "string" } }, "additionalProperties": false },
+    "files_read": { "type": "array", "items": { "type": "string" } }, "files_changed": { "type": "array", "items": { "type": "string" } }, "tests": { "type": "array", "minItems": 1 }, "manual_checks": { "type": "array" }, "budget": { "type": "object" }, "known_risks": { "type": "array", "items": { "type": "string" } }, "unresolved_questions": { "type": "array", "items": { "type": "string" } }, "recommended_next_action": { "type": "string" }, "session_id": { "type": "string" }, "assignment_id": { "type": "string" }, "task_revision": { "type": "integer", "minimum": 1 }, "effective_contract_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
   },
-  "additionalProperties": true
+  "additionalProperties": false
 }

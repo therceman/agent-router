@@ -14,6 +14,7 @@ import {
 import { initializedRepo, stateRootFor } from '../helpers.js';
 import { pathExists, readJson, writeJson } from '../../src/lib/fs.js';
 import type { TaskRecord } from '../../src/models.js';
+import { migrateProject } from '../../src/migration.js';
 
 async function createReadyTask(root: string, id: string): Promise<void> {
   await createTask({ cwd: root, id, title: id, objective: `Implement ${id}`, kind: 'implementation', allowedPaths: ['README.md'] });
@@ -88,7 +89,7 @@ test('task supersede rejects self-reference, missing replacement, and completed 
   await assert.rejects(() => supersedeTask('DONE-001', 'OLD-002', root), /cannot be superseded/);
 });
 
-test('new task records use .json and legacy JSON-in-YAML records are migrated on first read', async () => {
+test('new task records use .json and legacy records require explicit migration', async () => {
   const root = await initializedRepo();
   await createTask({ cwd: root, id: 'JSON-001', title: 'JSON task', objective: 'Use JSON storage', kind: 'implementation' });
   const stateRoot = await stateRootFor(root);
@@ -99,10 +100,20 @@ test('new task records use .json and legacy JSON-in-YAML records are migrated on
   const legacy = { ...original, task_id: 'LEGACY-001', title: 'Legacy task' };
   await writeFile(resolve(stateRoot, 'tasks/draft/LEGACY-001.yaml'), `${JSON.stringify(legacy, null, 2)}\n`);
 
+  const observed = await getTask('LEGACY-001', root);
+  assert.match(observed.path, /LEGACY-001\.yaml$/);
+  assert.equal(observed.migration_required, true);
+  assert.equal(await pathExists(resolve(stateRoot, 'tasks/draft/LEGACY-001.yaml')), true);
+  const check = await migrateProject({ cwd: root, from: '0.8.0', to: '0.8.1', check: true });
+  assert.equal(check.applied, false);
+  assert.equal(await pathExists(resolve(stateRoot, 'tasks/draft/LEGACY-001.yaml')), true);
+  const applied = await migrateProject({ cwd: root, from: '0.8.0', to: '0.8.1', apply: true });
+  assert.equal(applied.applied, true);
   const migrated = await getTask('LEGACY-001', root);
   assert.match(migrated.path, /LEGACY-001\.json$/);
+  assert.equal(migrated.migration_required, false);
   assert.equal(await pathExists(resolve(stateRoot, 'tasks/draft/LEGACY-001.yaml')), false);
-  assert.equal((await readdir(resolve(stateRoot, 'tasks/draft'))).filter((name) => name.startsWith('LEGACY-001')).length, 1);
+  assert.equal((await readdir(resolve(stateRoot, 'tasks/draft'))).filter((name) => name === 'LEGACY-001.json').length, 1);
 });
 
 

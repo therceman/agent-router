@@ -124,11 +124,12 @@ Check:
 
 ```bash
 agent-router --version
-# 0.8.0
+# 0.8.1
+```
 
 ## Persistent worker sessions
 
-Agent Router 0.8.0 keeps compatible Codex worker sessions idle for bounded
+Agent Router 0.8.1 keeps compatible Codex worker sessions idle for bounded
 reuse. Run `agent-router session acquire --task TASK-ID --json`, send only the
 returned command-only dispatch message, and let the worker load canonical state
 with `agent-router work open`. Use `work sync` for amendments and `work reopen`
@@ -137,7 +138,6 @@ retired by policy.
 
 The parent session never places task content in provider transport and Agent
 Router never invokes provider-native tools directly.
-```
 
 ## Configure Codex globally
 
@@ -283,6 +283,7 @@ agent-router task route TASK-ID
 agent-router context build TASK-ID
 agent-router task dispatch TASK-ID
 agent-router task start TASK-ID
+agent-router task refresh TASK-ID
 agent-router handoff complete TASK-ID --file worker-result.json
 agent-router review import TASK-ID review.json
 agent-router task accept TASK-ID
@@ -293,9 +294,12 @@ Recovery and replacement:
 ```bash
 agent-router task retry TASK-ID
 agent-router task supersede OLD-TASK --by REPLACEMENT-TASK
+agent-router provider action next --json
+agent-router state transactions --pending --json
+agent-router state recover --check --json
 ```
 
-Canonical task files use `.json`. Legacy JSON-in-`.yaml` task records from v0.4 are migrated on first read. Agents must never use `mv`, `rm`, or direct edits inside `~/.agent-router/projects/`.
+Canonical task files use `.json`. Legacy JSON-in-`.yaml` task records require the explicit migration command; read-only commands never migrate them. Agents must never use `mv`, `rm`, or direct edits inside `~/.agent-router/projects/`.
 
 ## Secure development with external ChatGPT brain
 
@@ -439,5 +443,5 @@ npm run bootstrap:offline
 The shipped npm tarball has zero runtime dependencies and can be installed from a local file without registry access:
 
 ```bash
-npm install -g ./therceman-agent-router-0.8.0.tgz --no-audit --no-fund
+npm install -g ./therceman-agent-router-0.8.1.tgz --no-audit --no-fund
 ```

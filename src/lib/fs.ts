@@ -1,3 +1,4 @@
+import { hostname } from 'node:os';
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -47,14 +48,24 @@ export async function removeIfExists(path: string): Promise<void> {
 
 export interface LockMetadata {
   pid: number;
-  timestamp: string;
+  host: string;
+  nonce: string;
+  acquired_at: string;
+  heartbeat_at: string;
+  /** v0.8 compatibility field. */
+  timestamp?: string;
   command: string;
   project_id: string;
 }
 
+function processAlive(pid: number, host: string): boolean {
+  if (host !== hostname()) return false;
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
 export async function withFileLock<T>(
   path: string,
-  metadata: Omit<LockMetadata, 'pid' | 'timestamp'>,
+  metadata: Pick<LockMetadata, 'command' | 'project_id'>,
   fn: () => Promise<T>,
   options: { timeoutMs?: number; staleMs?: number; pollMs?: number } = {},
 ): Promise<T> {
@@ -64,12 +75,27 @@ export async function withFileLock<T>(
   const started = Date.now();
   await ensureDir(dirname(path));
   let handle: Awaited<ReturnType<typeof open>> | undefined;
+  let owner: LockMetadata | undefined;
+  let heartbeat: NodeJS.Timeout | undefined;
   while (!handle) {
     try {
       handle = await open(path, 'wx', 0o600);
-      const record: LockMetadata = { pid: process.pid, timestamp: new Date().toISOString(), ...metadata };
+      const now = new Date().toISOString();
+      const record: LockMetadata = { ...metadata, pid: process.pid, host: hostname(), nonce: randomUUID(), acquired_at: now, heartbeat_at: now, timestamp: now };
+      owner = record;
       await handle.writeFile(`${JSON.stringify(record)}\n`);
       await handle.sync();
+      heartbeat = setInterval(async () => {
+        if (!owner) return;
+        try {
+          const current = JSON.parse(await readFile(path, 'utf8')) as Partial<LockMetadata>;
+          if (current.nonce !== owner.nonce) return;
+          const updated = { ...owner, heartbeat_at: new Date().toISOString(), timestamp: new Date().toISOString() };
+          await atomicWrite(path, `${JSON.stringify(updated)}\n`);
+          owner = updated;
+        } catch { /* The critical section will fail or release conservatively. */ }
+      }, Math.max(250, Math.min(5000, Math.floor(staleMs / 3))));
+      heartbeat.unref?.();
     } catch (error) {
       await handle?.close().catch(() => undefined);
       handle = undefined;
@@ -77,8 +103,8 @@ export async function withFileLock<T>(
       let stale = false;
       try {
         const info = JSON.parse(await readFile(path, 'utf8')) as Partial<LockMetadata>;
-        const at = Date.parse(String(info.timestamp ?? ''));
-        stale = !Number.isFinite(at) || Date.now() - at > staleMs;
+        const at = Date.parse(String(info.heartbeat_at ?? info.acquired_at ?? info.timestamp ?? ''));
+        stale = !Number.isFinite(at) || (!processAlive(Number(info.pid), String(info.host ?? '')) && Date.now() - at > staleMs);
       } catch {
         // A malformed lock is only recoverable once it has aged beyond the stale threshold.
         try { stale = Date.now() - (await stat(path)).mtimeMs > staleMs; } catch { stale = false; }
@@ -91,7 +117,11 @@ export async function withFileLock<T>(
   try {
     return await fn();
   } finally {
+    if (heartbeat) clearInterval(heartbeat);
     await handle.close().catch(() => undefined);
-    await rm(path, { force: true });
+    try {
+      const current = JSON.parse(await readFile(path, 'utf8')) as Partial<LockMetadata>;
+      if (owner && current.nonce === owner.nonce) await rm(path, { force: true });
+    } catch { /* A replaced or already removed lock belongs to another owner. */ }
   }
 }

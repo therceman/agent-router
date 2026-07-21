@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://therceman.dev/agent-router/phase-context.schema.json",
+  "title": "Agent Router Phase Context",
+  "type": "object",
+  "required": ["schema_version", "task_id", "task_revision", "effective_contract_sha256", "phase", "role", "files", "total_bytes", "excluded", "budget", "created_at"],
+  "properties": {
+    "schema_version": { "const": 1 }, "task_id": { "type": "string" }, "task_revision": { "type": "integer", "minimum": 1 }, "effective_contract_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "phase": { "enum": ["primary", "review"] }, "role": { "type": "string", "not": { "const": "main" } }, "files": { "type": "array", "items": { "$ref": "context.schema.json#/$defs/context_file" } }, "total_bytes": { "type": "integer", "minimum": 0 }, "excluded": { "type": "array" }, "budget": { "$ref": "task.schema.json#/properties/budgets" }, "created_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

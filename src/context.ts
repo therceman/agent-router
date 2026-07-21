@@ -4,7 +4,7 @@ import type { ContextBundle, TaskRecord } from './models.js';
 import { sha256 } from './lib/hash.js';
 import { pathExists, readJson, writeJson } from './lib/fs.js';
 import { safeProjectPath } from './lib/path.js';
-import { getTask, transitionTask } from './task.js';
+import { getTask, requireCanonicalTask, transitionTask } from './task.js';
 
 const BINARY_EXTENSIONS = new Set(['.zip', '.tar', '.gz', '.bin', '.db', '.sqlite', '.png', '.jpg', '.jpeg', '.gif', '.pdf', '.exe', '.dll', '.so', '.dylib']);
 
@@ -24,7 +24,8 @@ function isForbidden(task: TaskRecord, path: string): string | null {
 }
 
 export async function buildContext(taskId: string, cwd?: string): Promise<ContextBundle> {
-  const { root, stateRoot, task } = await getTask(taskId, cwd);
+  const { root, stateRoot, path, task } = await getTask(taskId, cwd);
+  requireCanonicalTask(task, path);
   if (task.state !== 'routed') throw new Error(`Task must be routed before context construction; current state is ${task.state}`);
   if (!task.scope.allowed_paths.length && !task.budgets.repository_wide_scan) throw new Error('Task has no allowed paths and repository-wide scanning is disabled');
   if (task.scope.allowed_paths.length > task.budgets.maximum_files_read) throw new Error('Context file count exceeds budget');
@@ -52,10 +53,13 @@ export async function buildContext(taskId: string, cwd?: string): Promise<Contex
   if (!(await pathExists(routePath))) throw new Error('Route record is missing');
   const bundle: ContextBundle = {
     schema_version: 1, task_id: taskId, route_path: routePath, files, total_bytes: totalBytes,
-    excluded, budget: task.budgets, created_at: new Date().toISOString(),
+    excluded, budget: task.budgets, created_at: new Date().toISOString(), task_revision: task.revision ?? 1, effective_contract_sha256: task.effective_contract_sha256, phase: 'primary', role: undefined,
   };
   await writeJson(resolve(stateRoot, 'contexts', `${taskId}.json`), bundle);
-  await transitionTask(taskId, 'context_ready', root, { files: files.length, bytes: totalBytes });
+  await writeJson(resolve(stateRoot, 'contexts/phases', taskId, 'primary.json'), bundle);
+  const transitioned = await transitionTask(taskId, 'context_ready', root, { files: files.length, bytes: totalBytes });
+  transitioned.context_revision = task.revision ?? 1; transitioned.route_revision = task.revision ?? 1; transitioned.derived_state_status = 'current';
+  await writeJson(resolve(stateRoot, 'tasks/active', `${taskId}.json`), transitioned);
   return bundle;
 }
 

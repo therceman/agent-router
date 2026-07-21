@@ -30,6 +30,9 @@ import { workBlock, workComplete, workOpen, workRelinquish, workReopen, workStat
 import { createTaskAmendment, getTaskAmendment, listTaskAmendments } from './amendment.js';
 import { migrationCheck, migrateProject } from './migration.js';
 import { providerCapabilities, setProviderCapabilities } from './provider-capabilities.js';
+import { refreshTask } from './refresh.js';
+import { confirmProviderAction, failProviderAction, listProviderActions, nextProviderAction, retryProviderAction } from './provider-actions.js';
+import { listStateTransactions, recoverStateTransactions } from './lib/state-transaction.js';
 
 interface ParsedArgs { positional: string[]; flags: Map<string, string[]>; }
 
@@ -100,7 +103,7 @@ Plans:
 
 Tasks:
   task create --id ID --title TITLE --objective TEXT --kind KIND [--plan PLAN] [--allow PATH] [--test COMMAND]
-  task list | show ID | next | activate ID | route ID | dispatch ID | start ID
+  task list | show ID | next | activate ID | route ID | refresh ID | dispatch ID | start ID
   task retry ID | supersede ID --by REPLACEMENT_ID
   task block ID | cancel ID | accept ID
   route explain ID
@@ -134,7 +137,9 @@ Persistent sessions and worker API:
   task amendments TASK | amendment TASK --revision N
   provider capabilities
   provider capability set --resume true|false|unknown --persistent-across-parent-restart true|false|unknown --source SOURCE
-  migrate --from 0.7.0 --to 0.8.0 [--check|--apply]
+  provider action list|next|confirm ID|fail ID --detail TEXT|retry ID
+  state transactions [--pending] | state recover [--check|--apply]
+  migrate --from 0.8.0 --to 0.8.1 [--check|--apply]
 `;
 
 const SETUP_HELP = `Usage:
@@ -282,11 +287,28 @@ async function main(): Promise<number> {
       const parseCapability = (name: string): boolean | 'unknown' => { const value = required(flag(parsed, name), `--${name}`); if (value === 'true') return true; if (value === 'false') return false; if (value === 'unknown') return 'unknown'; throw new Error(`Invalid ${name}: ${value}`); };
       print(await setProviderCapabilities({ resume: parseCapability('resume'), persistent_across_parent_restart: parseCapability('persistent-across-parent-restart'), source: required(flag(parsed, 'source'), '--source') as 'configured' | 'manual-smoke-test' | 'runtime-observation' }), json); return 0;
     }
+    if (sub === 'action') {
+      const action = parsed.positional[1];
+      if (action === 'list') { print(await listProviderActions(projectCwd, bool(parsed, 'pending')), json); return 0; }
+      if (action === 'next') { print(await nextProviderAction(projectCwd), json); return 0; }
+      const actionId = required(parsed.positional[2], 'provider action ID');
+      if (action === 'confirm') { print(await confirmProviderAction(actionId, projectCwd), json); return 0; }
+      if (action === 'fail') { print(await failProviderAction(actionId, required(flag(parsed, 'detail'), '--detail'), projectCwd), json); return 0; }
+      if (action === 'retry') { print(await retryProviderAction(actionId, projectCwd), json); return 0; }
+    }
     throw new Error(`Unknown provider subcommand: ${sub}`);
   }
 
+  if (command === 'state') {
+    const sub = required(parsed.positional[0], 'state subcommand');
+    const runtime = await resolveProjectRuntime(projectCwd);
+    if (sub === 'transactions') { print(await listStateTransactions(runtime.stateRoot, bool(parsed, 'pending')), json); return 0; }
+    if (sub === 'recover') { print(await recoverStateTransactions(runtime.stateRoot, bool(parsed, 'apply')), json); return 0; }
+    throw new Error(`Unknown state subcommand: ${sub}`);
+  }
+
   if (command === 'migrate') {
-    const result = await migrateProject({ cwd: projectCwd, from: flag(parsed, 'from', '0.7.0'), to: flag(parsed, 'to', VERSION), check: bool(parsed, 'check'), apply: bool(parsed, 'apply') }); print(result, json); return 0;
+    const result = await migrateProject({ cwd: projectCwd, from: flag(parsed, 'from', '0.8.0'), to: flag(parsed, 'to', VERSION), check: bool(parsed, 'check'), apply: bool(parsed, 'apply') }); print(result, json); return 0;
   }
 
   if (command === 'session') {
@@ -355,10 +377,11 @@ async function main(): Promise<number> {
       print(task, json); return 0;
     }
     if (sub === 'list') { print(await listTasks(projectCwd), json); return 0; }
-    if (sub === 'show') { print((await getTask(required(id, 'task ID'), projectCwd)).task, json); return 0; }
+    if (sub === 'show') { const found = await getTask(required(id, 'task ID'), projectCwd); print(found.migration_required ? { ...found.task, migration_required: true } : found.task, json); return 0; }
     if (sub === 'next') { print(await nextTask(projectCwd), json); return 0; }
     if (sub === 'activate') { print(await activateTask(required(id, 'task ID'), projectCwd), json); return 0; }
     if (sub === 'route') { print(await routeAndPersist(required(id, 'task ID'), projectCwd), json); return 0; }
+    if (sub === 'refresh') { print(await refreshTask(required(id, 'task ID'), projectCwd), json); return 0; }
     if (sub === 'dispatch') { print(await dispatchTask(required(id, 'task ID'), projectCwd), json); return 0; }
     if (sub === 'start') { print(await startTask(required(id, 'task ID'), projectCwd), json); return 0; }
     if (sub === 'retry') { print(await retryTask(required(id, 'task ID'), projectCwd), json); return 0; }

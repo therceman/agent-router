@@ -161,6 +161,7 @@ async function createStateDirectories(stateRoot: string): Promise<void> {
     'tasks/draft', 'tasks/ready', 'tasks/active', 'tasks/review', 'tasks/blocked', 'tasks/done', 'tasks/cancelled',
     'contexts', 'handoffs', 'reviews', 'events', 'generated', 'manifests', 'runtime', 'roles', 'logs',
     'tasks/amendments', 'sessions/active', 'sessions/retired', 'assignments/active', 'assignments/history', 'locks',
+    'generated/phases', 'contexts/phases', 'provider-actions/pending', 'provider-actions/history', 'transactions',
   ];
   for (const dir of directories) await ensureDir(resolve(stateRoot, dir));
   const events = resolve(stateRoot, 'events/events.jsonl');

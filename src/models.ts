@@ -89,6 +89,9 @@ export interface TaskRecord {
   last_assignment_id?: string;
   last_session_id?: string;
   legacy_unassigned?: boolean;
+  route_revision?: number;
+  context_revision?: number;
+  derived_state_status?: 'current' | 'stale';
 }
 
 export interface TaskContract {
@@ -125,6 +128,11 @@ export interface RouteRecord {
   };
   budget: TaskBudgets;
   created_at: string;
+  task_revision?: number;
+  effective_contract_sha256?: string;
+  phase?: AssignmentPhase;
+  approval_policy?: string;
+  sandbox_mode?: 'read-only' | 'workspace-write';
 }
 
 export interface ContextFile {
@@ -143,6 +151,10 @@ export interface ContextBundle {
   excluded: Array<{ path: string; reason: string }>;
   budget: TaskBudgets;
   created_at: string;
+  task_revision?: number;
+  effective_contract_sha256?: string;
+  phase?: AssignmentPhase;
+  role?: RoleId;
 }
 
 export interface HandoffRecord {
@@ -235,6 +247,7 @@ export interface SessionRecord {
   sandbox_mode: 'read-only' | 'workspace-write';
   approval_policy: string;
   status: SessionStatus;
+  current_phase?: AssignmentPhase;
   current_assignment_id?: string;
   assigned_task?: string;
   assigned_revision?: number;
@@ -259,13 +272,19 @@ export type AssignmentStatus =
   | 'pending_transport' | 'transport_confirmed' | 'acknowledged' | 'completed'
   | 'blocked' | 'relinquished' | 'stale' | 'cancelled';
 
+export type AssignmentPhase = 'primary' | 'review';
+export type AssignmentTransportStatus = 'pending' | 'succeeded' | 'failed';
+export type AssignmentWorkStatus = 'reserved' | 'acknowledged' | 'completed' | 'blocked' | 'relinquished' | 'stale' | 'cancelled';
+
 export interface AssignmentRecord {
-  schema_version: 1;
+  schema_version: 1 | 2;
   assignment_id: string;
   project_id: string;
   task_id: string;
   task_revision: number;
+  effective_contract_sha256?: string;
   session_id: string;
+  phase?: AssignmentPhase;
   role: RoleId;
   route_sha256: string;
   context_sha256: string;
@@ -274,6 +293,9 @@ export interface AssignmentRecord {
   dispatch_command: string;
   dispatch_message: string;
   status: AssignmentStatus;
+  work_status?: AssignmentWorkStatus;
+  transport_status?: AssignmentTransportStatus;
+  sync_required?: boolean;
   created_at: string;
   updated_at: string;
   transport_confirmed_at?: string;
@@ -281,6 +303,35 @@ export interface AssignmentRecord {
   completed_at?: string;
   failure_code?: string;
   failure_detail?: string;
+}
+
+export interface PhaseRouteRecord {
+  schema_version: 1;
+  task_id: string;
+  task_revision: number;
+  effective_contract_sha256: string;
+  phase: AssignmentPhase;
+  role: RoleId;
+  model_class: 'cheap' | 'balanced' | 'expert';
+  provider_model: string;
+  reasoning: 'low' | 'medium' | 'high' | 'xhigh';
+  sandbox_mode: 'read-only' | 'workspace-write';
+  approval_policy: string;
+  created_at: string;
+}
+
+export interface PhaseContextRecord {
+  schema_version: 1;
+  task_id: string;
+  task_revision: number;
+  effective_contract_sha256: string;
+  phase: AssignmentPhase;
+  role: RoleId;
+  files: ContextFile[];
+  total_bytes: number;
+  excluded: Array<{ path: string; reason: string }>;
+  budget: TaskBudgets;
+  created_at: string;
 }
 
 export interface TaskAmendmentRecord {
@@ -357,4 +408,40 @@ export interface ProviderSessionCapabilities {
   persistent_across_parent_restart: boolean | 'unknown';
   detected_at: string;
   source: 'configured' | 'manual-smoke-test' | 'runtime-observation';
+}
+
+export interface ProviderActionRecord {
+  schema_version: 1;
+  action_id: string;
+  provider: 'codex';
+  action: 'close';
+  project_id: string;
+  session_id: string;
+  provider_agent_id: string;
+  reason: SessionRetireReason;
+  status: 'pending' | 'confirmed' | 'failed';
+  created_at: string;
+  updated_at: string;
+  confirmed_at?: string;
+  failed_at?: string;
+  failure_detail?: string;
+}
+
+export interface StateTransactionRecord {
+  schema_version: 1;
+  transaction_id: string;
+  project_id: string;
+  operation: string;
+  status: 'prepared' | 'committing' | 'committed' | 'rolling_back' | 'rolled_back' | 'recovery_required';
+  created_at: string;
+  updated_at: string;
+  operations: Array<{
+    kind: 'write' | 'move' | 'remove';
+    target: string;
+    staged_path?: string;
+    backup_path?: string;
+    before_sha256?: string | null;
+    after_sha256?: string | null;
+  }>;
+  error?: string;
 }
