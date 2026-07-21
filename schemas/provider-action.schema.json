@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://therceman.dev/agent-router/provider-action.schema.json",
+  "title": "Agent Router Provider Action",
+  "type": "object",
+  "required": ["schema_version", "action_id", "provider", "action", "project_id", "session_id", "provider_agent_id", "reason", "status", "created_at", "updated_at"],
+  "properties": {
+    "schema_version": { "const": 1 }, "action_id": { "type": "string", "pattern": "^PAC-[A-Za-z0-9][A-Za-z0-9._-]{1,79}$" }, "provider": { "const": "codex" }, "action": { "const": "close" }, "project_id": { "type": "string" }, "session_id": { "type": "string" }, "provider_agent_id": { "type": "string", "minLength": 1 }, "reason": { "type": "string", "minLength": 1 }, "status": { "enum": ["pending", "confirmed", "failed"] }, "created_at": { "type": "string", "format": "date-time" }, "updated_at": { "type": "string", "format": "date-time" }, "confirmed_at": { "type": "string", "format": "date-time" }, "failed_at": { "type": "string", "format": "date-time" }, "failure_detail": { "type": "string" }
+  },
+  "additionalProperties": false
+}

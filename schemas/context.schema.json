@@ -5,8 +5,11 @@
   "required": ["schema_version", "task_id", "files", "total_bytes", "excluded", "budget"],
   "properties": {
     "schema_version": { "const": 1 },
-    "files": { "type": "array" },
-    "total_bytes": { "type": "integer", "minimum": 0 }
+    "route_path": { "type": "string" },
+    "files": { "type": "array", "items": { "$ref": "#/$defs/context_file" } },
+    "total_bytes": { "type": "integer", "minimum": 0 },
+    "excluded": { "type": "array" }, "budget": { "$ref": "task.schema.json#/properties/budgets" }, "created_at": { "type": "string", "format": "date-time" }, "task_revision": { "type": "integer", "minimum": 1 }, "effective_contract_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "phase": { "enum": ["primary", "review"] }, "role": { "type": "string" }
   },
-  "additionalProperties": true
+  "$defs": { "context_file": { "type": "object", "required": ["path", "bytes", "sha256", "excerpt"], "properties": { "path": { "type": "string" }, "bytes": { "type": "integer", "minimum": 0 }, "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "excerpt": { "type": "string" } }, "additionalProperties": false } },
+  "additionalProperties": false
 }

@@ -15,7 +15,7 @@ The `prepare` script builds `dist/` automatically before installation from sourc
 ## From an npm tarball
 
 ```bash
-npm install -g ./therceman-agent-router-0.8.0.tgz --no-audit --no-fund
+npm install -g ./therceman-agent-router-0.8.1.tgz --no-audit --no-fund
 ```
 
 ## Verify
@@ -25,7 +25,7 @@ agent-router --version
 agent-router profile list
 ```
 
-Expected version: `0.8.0`.
+Expected version: `0.8.1`.
 
 ## Configure Codex
 

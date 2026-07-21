@@ -16,7 +16,9 @@
     "review",
     "revision",
     "previous_revision",
-    "effective_contract_sha256"
+    "effective_contract_sha256",
+    "created_at",
+    "updated_at"
   ],
   "properties": {
     "schema_version": {
@@ -60,6 +62,31 @@
       "type": "string",
       "minLength": 1
     },
+    "task_profile": {
+      "type": "object",
+      "required": ["task_kind", "ambiguity", "semantic_complexity", "security_criticality", "blast_radius", "novelty", "verification_strength", "context_scope", "destructive_potential", "historical_data_impact"],
+      "properties": {
+        "task_kind": { "enum": ["orchestration", "mechanical", "repository_hygiene", "exploration", "implementation", "migration", "verification", "architecture", "security_sensitive_development", "security_research", "security_verification"] },
+        "ambiguity": { "type": "integer", "minimum": 0, "maximum": 3 }, "semantic_complexity": { "type": "integer", "minimum": 0, "maximum": 3 }, "security_criticality": { "type": "integer", "minimum": 0, "maximum": 4 }, "blast_radius": { "type": "integer", "minimum": 0, "maximum": 3 }, "novelty": { "type": "integer", "minimum": 0, "maximum": 3 }, "verification_strength": { "type": "integer", "minimum": 0, "maximum": 3 }, "context_scope": { "type": "integer", "minimum": 0, "maximum": 3 }, "destructive_potential": { "type": "integer", "minimum": 0, "maximum": 3 }, "historical_data_impact": { "type": "integer", "minimum": 0, "maximum": 3 }
+      },
+      "additionalProperties": false
+    },
+    "scope": {
+      "type": "object",
+      "required": ["allowed_paths", "forbidden_paths"],
+      "properties": { "allowed_paths": { "type": "array", "items": { "type": "string" } }, "forbidden_paths": { "type": "array", "items": { "type": "string" } } },
+      "additionalProperties": false
+    },
+    "budgets": {
+      "type": "object",
+      "required": ["maximum_files_read", "maximum_context_bytes", "maximum_single_file_bytes", "maximum_tool_output_chars", "repository_wide_scan", "full_test_suite", "recursive_delegation"],
+      "properties": { "maximum_files_read": { "type": "integer", "minimum": 0 }, "maximum_context_bytes": { "type": "integer", "minimum": 1 }, "maximum_single_file_bytes": { "type": "integer", "minimum": 1 }, "maximum_tool_output_chars": { "type": "integer", "minimum": 1 }, "repository_wide_scan": { "type": "boolean" }, "full_test_suite": { "type": "boolean" }, "recursive_delegation": { "type": "boolean" } },
+      "additionalProperties": false
+    },
+    "acceptance": { "type": "array", "items": { "type": "string" } },
+    "tests": { "type": "object", "required": ["targeted", "checkpoint"], "properties": { "targeted": { "type": "array", "items": { "type": "string" } }, "checkpoint": { "type": "array", "items": { "type": "string" } } }, "additionalProperties": false },
+    "manual_verification": { "type": "array", "items": { "type": "string" } },
+    "outputs": { "type": "array", "items": { "type": "string" } },
     "revision": { "type": "integer", "minimum": 1 },
     "previous_revision": { "type": ["integer", "null"], "minimum": 1 },
     "latest_amendment_id": { "type": "string" },
@@ -123,7 +150,12 @@
         }
       },
       "additionalProperties": false
-    }
+    },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "route_revision": { "type": "integer", "minimum": 1 },
+    "context_revision": { "type": "integer", "minimum": 1 },
+    "derived_state_status": { "enum": ["current", "stale"] }
   },
-  "additionalProperties": true
+  "additionalProperties": false
 }

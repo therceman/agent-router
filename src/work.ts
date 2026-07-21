@@ -7,7 +7,9 @@ import { validateReviewRecord } from './review.js';
 import { pathExists, readJson, writeJson } from './lib/fs.js';
 import { canonicalSha256 } from './lib/hash.js';
 import { loadAmendments, materializeEffectiveTaskContract } from './amendment.js';
-import { activeAssignmentPath, appendSessionEvent, completeAssignment, getSession, revisionOf, transitionSession, validateAssignment, validateSession, workAssignment, readSession } from './session.js';
+import { activeAssignmentPath, appendSessionEvent, completeAssignment, compatibilityKey, getSession, revisionOf, transitionSession, validateAssignment, validateSession, workAssignment, readSession } from './session.js';
+import { phaseContextPath, phaseRoutePath } from './phase.js';
+import { validateRoleResultPayload } from './role-results.js';
 import { resolveProjectRuntime } from './state.js';
 
 const RESULT_KIND: Record<Exclude<RoleId, 'main'>, WorkResultEnvelope['result_kind']> = {
@@ -36,38 +38,46 @@ function publicTask(task: TaskRecord, contract: Awaited<ReturnType<typeof effect
 
 async function assignedForWorker(taskId: string, sessionId: string, cwd?: string): Promise<Awaited<ReturnType<typeof workAssignment>>> {
   const found = await workAssignment(taskId, sessionId, cwd);
-  if (found.assignment.status !== 'acknowledged') throw new Error(`Assignment is not acknowledged: ${found.assignment.status}`);
+  if (found.assignment.schema_version !== 2) throw new Error('Project state requires migration before mutating an assignment. Run agent-router migrate --apply');
+  if (found.assignment.status !== 'acknowledged' && found.assignment.work_status !== 'acknowledged') throw new Error(`Assignment is not acknowledged: ${found.assignment.status}`);
   return found;
 }
 
 export async function workOpen(taskId: string, sessionId: string, cwd?: string): Promise<Record<string, unknown>> {
   const found = await workAssignment(taskId, sessionId, cwd);
   if (!['pending_spawn', 'reserved'].includes(found.session.status)) throw new Error(`Session must be reserved or pending_spawn; current state is ${found.session.status}`);
-  if (found.task.state !== 'dispatched') throw new Error(`Task must be dispatched before work open; current state is ${found.task.state}`);
+  if (found.assignment.phase === 'primary' && found.task.state !== 'dispatched') throw new Error(`Task must be dispatched before work open; current state is ${found.task.state}`);
+  if (found.assignment.phase === 'review' && !['worker_complete', 'review_pending'].includes(found.task.state)) throw new Error(`Task is not reviewable; current state is ${found.task.state}`);
   if (!['pending_transport', 'transport_confirmed'].includes(found.assignment.status)) throw new Error(`Assignment cannot be acknowledged from ${found.assignment.status}`);
   const { contract } = await effective(found.task, found.runtime.stateRoot);
-  const context = await readJson<Awaited<ReturnType<typeof import('./context.js').readContext>>>(resolve(found.runtime.stateRoot, 'contexts', `${taskId}.json`));
+  const contextPath = found.assignment.phase === 'review' ? phaseContextPath(found.runtime.stateRoot, taskId, 'review', found.session.role) : resolve(found.runtime.stateRoot, 'contexts', `${taskId}.json`);
+  const context = await readJson<Awaited<ReturnType<typeof import('./context.js').readContext>>>(contextPath);
   const now = new Date().toISOString();
-  found.assignment.status = 'acknowledged'; found.assignment.acknowledged_at = now; found.assignment.updated_at = now;
+  found.assignment.status = 'acknowledged'; found.assignment.work_status = 'acknowledged'; found.assignment.acknowledged_at = now; found.assignment.updated_at = now;
   found.session.acknowledged_revision = found.assignment.task_revision; found.session.updated_at = now; found.session.last_used_at = now;
   validateAssignment(found.assignment); await writeJson(activeAssignmentPath(found.runtime.stateRoot, taskId), found.assignment);
   await transitionSession(found.runtime.stateRoot, found.session, 'busy', { task_id: taskId, assignment_id: found.assignment.assignment_id });
-  await transitionTask(taskId, 'in_progress', found.runtime.repoRoot, { session_id: sessionId, assignment_id: found.assignment.assignment_id, revision: found.assignment.task_revision });
+  if (found.assignment.phase !== 'review') await transitionTask(taskId, 'in_progress', found.runtime.repoRoot, { session_id: sessionId, assignment_id: found.assignment.assignment_id, revision: found.assignment.task_revision });
   await appendSessionEvent(found.runtime.stateRoot, { project_id: found.runtime.projectId, session_id: sessionId, task_id: taskId, assignment_id: found.assignment.assignment_id, type: 'work_acknowledged', from_status: 'reserved', to_status: 'busy', details: { revision: found.assignment.task_revision } });
-  return { task: publicTask(found.task, contract, context), task_id: taskId, revision: found.assignment.task_revision, role: found.session.role, session_id: sessionId, assignment_id: found.assignment.assignment_id, exact_completion_command: `agent-router work complete ${taskId} --session ${sessionId} --file RESULT.json` };
+  return { task: publicTask(found.task, contract, context), task_id: taskId, revision: found.assignment.task_revision, phase: found.assignment.phase ?? 'primary', role: found.session.role, session_id: sessionId, assignment_id: found.assignment.assignment_id, exact_completion_command: `agent-router work complete ${taskId} --session ${sessionId} --file RESULT.json` };
 }
 
 export async function workSync(taskId: string, sessionId: string, cwd?: string): Promise<Record<string, unknown>> {
   const runtime = await resolveProjectRuntime(cwd); const taskFound = await getTask(taskId, runtime.repoRoot); const session = (await readSession(runtime.stateRoot, sessionId)).session; const assignmentPath = activeAssignmentPath(runtime.stateRoot, taskId); if (!(await pathExists(assignmentPath))) throw new Error('Active assignment not found'); const assignment = await readJson<import('./models.js').AssignmentRecord>(assignmentPath); validateAssignment(assignment);
   if (assignment.session_id !== sessionId || session.current_assignment_id !== assignment.assignment_id || session.status !== 'busy') throw new Error('Session does not own an active busy assignment');
-  if (taskFound.task.state !== 'in_progress') throw new Error(`Task is not in progress; current state is ${taskFound.task.state}`);
+  if (assignment.schema_version !== 2) throw new Error('Project state requires migration before mutating an assignment. Run agent-router migrate --apply');
+  if (!['in_progress', 'worker_complete', 'review_pending'].includes(taskFound.task.state)) throw new Error(`Task is not synchronizable; current state is ${taskFound.task.state}`);
   const currentRevision = revisionOf(taskFound.task); const acknowledged = session.acknowledged_revision ?? assignment.task_revision;
   if (currentRevision <= acknowledged) throw new Error('No newer task revision is available for sync');
+  if (assignment.sync_required !== true) throw new Error('Assignment does not require synchronization');
   const amendments = await loadAmendments(runtime.stateRoot, taskId); const delta = amendments.filter((item) => item.to_revision > acknowledged && item.to_revision <= currentRevision); if (delta.length !== currentRevision - acknowledged) throw new Error('Amendment chain is incomplete');
-  const contract = materializeEffectiveTaskContract(taskFound.task, amendments); const currentContext = await readJson<Record<string, unknown>>(resolve(runtime.stateRoot, 'contexts', `${taskId}.json`));
-  const currentRoute = await readJson<Record<string, unknown>>(resolve(runtime.stateRoot, 'generated', `${taskId}.route.json`));
+  const contract = materializeEffectiveTaskContract(taskFound.task, amendments); const phase = assignment.phase ?? 'primary'; const currentContext = phase === 'primary' ? await readJson<Record<string, unknown>>(resolve(runtime.stateRoot, 'contexts', `${taskId}.json`)) : await readJson<Record<string, unknown>>(phaseContextPath(runtime.stateRoot, taskId, 'review', session.role));
+  const currentRoute = await readJson<Record<string, unknown>>(phase === 'primary' ? resolve(runtime.stateRoot, 'generated', `${taskId}.route.json`) : phaseRoutePath(runtime.stateRoot, taskId, 'review', session.role));
+  if (Number(currentRoute.task_revision) !== currentRevision || String(currentRoute.effective_contract_sha256) !== String(taskFound.task.effective_contract_sha256)) throw new Error('Derived route is stale; run task refresh before work sync');
+  const expectedKey = compatibilityKey({ project_id: runtime.projectId, role: session.role, phase, provider: 'codex', provider_model: String(currentRoute.provider_model), reasoning: String(currentRoute.reasoning) as SessionRecord['reasoning'], repository_root: runtime.repoRoot, sandbox_mode: String(currentRoute.sandbox_mode ?? session.sandbox_mode) as SessionRecord['sandbox_mode'], approval_policy: String(currentRoute.approval_policy ?? session.approval_policy) });
+  if (expectedKey !== session.compatibility_key) throw new Error('Session compatibility changed; reassign instead of synchronizing');
   session.acknowledged_revision = currentRevision; session.assigned_revision = currentRevision; session.updated_at = new Date().toISOString(); assignment.task_revision = currentRevision; assignment.route_sha256 = canonicalSha256(currentRoute); assignment.context_sha256 = canonicalSha256(currentContext); assignment.updated_at = session.updated_at;
-  validateAssignment(assignment); await writeJson(assignmentPath, assignment); validateSession(session); await writeJson(resolve(runtime.stateRoot, 'sessions/active', `${sessionId}.json`), session);
+  assignment.sync_required = false; assignment.work_status = assignment.status === 'acknowledged' ? 'acknowledged' : assignment.work_status; assignment.effective_contract_sha256 = taskFound.task.effective_contract_sha256; validateAssignment(assignment); await writeJson(assignmentPath, assignment); validateSession(session); await writeJson(resolve(runtime.stateRoot, 'sessions/active', `${sessionId}.json`), session);
   return { task_id: taskId, acknowledged_revision: acknowledged, current_revision: currentRevision, amendments: delta.map((item) => ({ revision: item.to_revision, amendment_kind: item.amendment_kind, source: item.source, changes: item.changes, source_review_role: item.source_review_role ?? null })), effective_contract_sha256: taskFound.task.effective_contract_sha256, contract_summary: { objective: contract.objective, allowed_paths: contract.scope.allowed_paths, forbidden_paths: contract.scope.forbidden_paths, acceptance: contract.acceptance, targeted_tests: contract.tests.targeted, checkpoint_tests: contract.tests.checkpoint, manual_verification: contract.manual_verification, review_feedback: contract.review_feedback, required_changes: contract.required_changes, notes: contract.notes } };
 }
 
@@ -102,12 +112,12 @@ export async function workComplete(taskId: string, sessionId: string, resultFile
   const found = await assignedForWorker(taskId, sessionId, cwd); if (found.session.status !== 'busy' || !['in_progress', 'worker_complete', 'review_pending'].includes(found.task.state)) throw new Error('Session must be busy with an active task');
   if ((found.session.acknowledged_revision ?? 0) !== revisionOf(found.task)) throw new Error('Task revision changed; run work sync before completion');
   try {
-    const envelope = validateEnvelope(await readJson<WorkResultEnvelope>(resolve(resultFile)), found.task, found.session, found.assignment.assignment_id); const payload = envelope.payload;
+    const envelope = validateEnvelope(await readJson<WorkResultEnvelope>(resolve(resultFile)), found.task, found.session, found.assignment.assignment_id); const payload = envelope.payload; validateRoleResultPayload(envelope.result_kind, payload, found.session.role, taskId);
     if (envelope.result_kind === 'implementation_handoff') {
       const handoff = payload as HandoffRecord; const { contract } = await effective(found.task, found.runtime.stateRoot); validateHandoffRecord(handoff, taskId, contract.scope.allowed_paths); if (handoff.task_revision !== undefined && handoff.task_revision !== revisionOf(found.task)) throw new Error('Handoff task revision mismatch');
       const canonicalHandoff: HandoffRecord = { ...handoff, session_id: sessionId, assignment_id: found.assignment.assignment_id, task_revision: revisionOf(found.task), effective_contract_sha256: found.task.effective_contract_sha256 };
       await writeJson(resolve(found.runtime.stateRoot, 'handoffs', `${taskId}.json`), canonicalHandoff); await transitionTask(taskId, 'worker_complete', found.runtime.repoRoot, { session_id: sessionId, assignment_id: found.assignment.assignment_id, revision: revisionOf(found.task) });
-    } else if (envelope.result_kind === 'verification_review' || envelope.result_kind === 'security_review' || envelope.result_kind === 'critical_review') {
+    } else if (found.assignment.phase === 'review' && (envelope.result_kind === 'verification_review' || envelope.result_kind === 'security_review' || envelope.result_kind === 'critical_review')) {
       const review = payload as ReviewRecord; validateReviewRecord(review, taskId); if (review.reviewer.role !== found.session.role) throw new Error('Review payload role does not match session role');
       const reviewIndex = found.task.review.sequence.indexOf(found.session.role);
       if (reviewIndex < 0) throw new Error(`Review role ${found.session.role} is not required for task ${taskId}`);
@@ -124,19 +134,19 @@ export async function workComplete(taskId: string, sessionId: string, resultFile
       const result = resultRecord(payload); const required: Record<string, string[]> = { architecture_decision: ['decision', 'constraints', 'rejected_alternatives', 'task_decomposition', 'acceptance_criteria', 'unresolved_questions'], scout_discovery: ['relevant_files', 'symbols', 'tests', 'dependencies', 'risks', 'recommended_bounded_scope'], repository_hygiene_report: ['findings'], security_research_result: ['authorization_scope', 'attack_surface', 'reachability', 'attacker_control', 'root_cause', 'impact', 'evidence', 'safe_verification_boundaries', 'unresolved_questions'] }; for (const key of required[envelope.result_kind] ?? []) if (!(key in result)) throw new Error(`Work result payload is missing ${key}`); await writeRoleResult(found.runtime.stateRoot, taskId, found.session.role, { ...envelope, payload }); await transitionTask(taskId, 'worker_complete', found.runtime.repoRoot, { role: found.session.role, session_id: sessionId });
     }
     const completed = await completeAssignment(found.runtime.stateRoot, found.session, found.assignment, 'completed');
-    return { task: (await getTask(taskId, found.runtime.repoRoot)).task, session: completed.session, assignment: completed.assignment };
+    return { task: (await getTask(taskId, found.runtime.repoRoot)).task, session: completed.session, assignment: completed.assignment, provider_actions: completed.provider_actions };
   } catch (error) {
     await recordWorkFailure(sessionId, found.runtime.repoRoot); throw error;
   }
 }
 
 export async function workBlock(taskId: string, sessionId: string, reason: string, cwd?: string): Promise<Record<string, unknown>> {
-  const found = await assignedForWorker(taskId, sessionId, cwd); if (found.session.status !== 'busy' || !['in_progress', 'dispatched'].includes(found.task.state)) throw new Error('Session must own an active task to block it');
+  const found = await assignedForWorker(taskId, sessionId, cwd); if (found.session.status !== 'busy' || !['in_progress', 'dispatched', 'worker_complete', 'review_pending'].includes(found.task.state)) throw new Error('Session must own an active task to block it');
   const allowed = ['scope-exceeded', 'missing-context', 'requirements-conflict', 'environment-blocked', 'test-infrastructure-blocked', 'security-boundary', 'authorization-required']; if (!allowed.includes(reason)) throw new Error(`Invalid block reason: ${reason}`);
-  await writeJson(resolve(found.runtime.stateRoot, 'generated', 'results', taskId, 'blocked.json'), { schema_version: 1, task_id: taskId, session_id: sessionId, assignment_id: found.assignment.assignment_id, reason, created_at: new Date().toISOString() }); await transitionTask(taskId, 'blocked', found.runtime.repoRoot, { reason, session_id: sessionId }); const completed = await completeAssignment(found.runtime.stateRoot, found.session, found.assignment, 'blocked'); return { task: (await getTask(taskId, found.runtime.repoRoot)).task, session: completed.session, assignment: completed.assignment, reason };
+  await writeJson(resolve(found.runtime.stateRoot, 'generated', 'results', taskId, 'blocked.json'), { schema_version: 1, task_id: taskId, session_id: sessionId, assignment_id: found.assignment.assignment_id, reason, created_at: new Date().toISOString() }); await transitionTask(taskId, 'blocked', found.runtime.repoRoot, { reason, session_id: sessionId }); const completed = await completeAssignment(found.runtime.stateRoot, found.session, found.assignment, 'blocked'); return { task: (await getTask(taskId, found.runtime.repoRoot)).task, session: completed.session, assignment: completed.assignment, provider_actions: completed.provider_actions, reason };
 }
 
 export async function workRelinquish(taskId: string, sessionId: string, reason: string, cwd?: string): Promise<Record<string, unknown>> {
-  const found = await assignedForWorker(taskId, sessionId, cwd); if (found.session.status !== 'busy' || !['in_progress', 'dispatched'].includes(found.task.state)) throw new Error('Session must own an active task to relinquish it'); if (!reason.trim()) throw new Error('Relinquish reason is required');
-  await writeJson(resolve(found.runtime.stateRoot, 'generated', 'results', taskId, 'relinquished.json'), { schema_version: 1, task_id: taskId, session_id: sessionId, assignment_id: found.assignment.assignment_id, reason, created_at: new Date().toISOString() }); await transitionTask(taskId, 'blocked', found.runtime.repoRoot, { reason, relinquished: true, session_id: sessionId }); const completed = await completeAssignment(found.runtime.stateRoot, found.session, found.assignment, 'relinquished'); return { task: (await getTask(taskId, found.runtime.repoRoot)).task, session: completed.session, assignment: completed.assignment, reason };
+  const found = await assignedForWorker(taskId, sessionId, cwd); if (found.session.status !== 'busy' || !['in_progress', 'dispatched', 'worker_complete', 'review_pending'].includes(found.task.state)) throw new Error('Session must own an active task to relinquish it'); if (!reason.trim()) throw new Error('Relinquish reason is required');
+  await writeJson(resolve(found.runtime.stateRoot, 'generated', 'results', taskId, 'relinquished.json'), { schema_version: 1, task_id: taskId, session_id: sessionId, assignment_id: found.assignment.assignment_id, reason, created_at: new Date().toISOString() }); await transitionTask(taskId, 'blocked', found.runtime.repoRoot, { reason, relinquished: true, session_id: sessionId }); const completed = await completeAssignment(found.runtime.stateRoot, found.session, found.assignment, 'relinquished'); return { task: (await getTask(taskId, found.runtime.repoRoot)).task, session: completed.session, assignment: completed.assignment, provider_actions: completed.provider_actions, reason };
 }

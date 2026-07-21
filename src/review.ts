@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import type { ContextBundle, ReviewRecord } from './models.js';
 import { pathExists, readJson, writeJson, ensureDir } from './lib/fs.js';
 import { run, runChecked } from './lib/process.js';
-import { getTask, transitionTask } from './task.js';
+import { getTask, requireCanonicalTask, transitionTask } from './task.js';
 import { readHandoff } from './handoff.js';
 import { createZip, type ZipEntry } from './zip.js';
 import { scanSecrets } from './secret.js';
@@ -19,10 +19,14 @@ function safeRole(role: string): string {
 
 export function validateReviewRecord(review: ReviewRecord, taskId: string): void {
   if (review.schema_version !== 1 || review.task_id !== taskId) throw new Error('Review task identity mismatch');
+  const allowed = new Set(['schema_version', 'task_id', 'reviewer', 'verdict', 'acceptance_criteria', 'tests_verified', 'manual_checks_verified', 'scope_verified', 'unrelated_changes_found', 'false_success_paths_found', 'required_followups', 'risks', 'findings', 'required_changes']);
+  const unknown = Object.keys(review as unknown as Record<string, unknown>).filter((key) => !allowed.has(key)); if (unknown.length) throw new Error(`Review contains unknown field(s): ${unknown.join(', ')}`);
   if (!['accepted', 'rejected', 'accepted_with_followup', 'blocked', 'architect_review_required', 'critical_review_required'].includes(review.verdict)) throw new Error('Invalid review verdict');
   if (review.reviewer.role === 'implementation_worker') throw new Error('Implementation worker cannot review its own work');
-  safeRole(review.reviewer.role);
+  safeRole(review.reviewer.role); if (typeof review.reviewer.role !== 'string' || !review.reviewer.role.trim()) throw new Error('Review reviewer role is required');
   if (!Array.isArray(review.required_followups) || !Array.isArray(review.risks)) throw new Error('Review arrays are required');
+  for (const value of [...review.required_followups, ...review.risks, ...(review.findings ?? []), ...(review.required_changes ?? [])]) if (typeof value !== 'string' || !value.trim()) throw new Error('Review narrative arrays must contain non-empty strings');
+  if (review.acceptance_criteria) for (const criterion of review.acceptance_criteria) { if (!criterion || typeof criterion.criterion !== 'string' || !criterion.criterion.trim() || !['passed', 'failed'].includes(criterion.result)) throw new Error('Review acceptance criteria are invalid'); }
 }
 
 async function loadReviews(stateRoot: string, taskId: string): Promise<Record<string, ReviewRecord>> {
@@ -37,7 +41,8 @@ async function loadReviews(stateRoot: string, taskId: string): Promise<Record<st
 }
 
 export async function importReview(taskId: string, reviewFile: string, cwd?: string): Promise<ReviewRecord> {
-  const { root, stateRoot, task } = await getTask(taskId, cwd);
+  const { root, stateRoot, path: taskPath, task } = await getTask(taskId, cwd);
+  requireCanonicalTask(task, taskPath);
   if (!['worker_complete', 'review_pending'].includes(task.state)) throw new Error(`Task must be worker_complete or review_pending before review import; current state is ${task.state}`);
   const review = await readJson<ReviewRecord>(resolve(reviewFile));
   validateReviewRecord(review, taskId);

@@ -1,4 +1,5 @@
 import type { RouteRecord, TaskRecord } from './models.js';
+import { ROLE_METADATA } from './config.js';
 
 const MODELS = {
   cheap: 'gpt-5.6-luna',
@@ -100,6 +101,9 @@ export function routeTask(task: TaskRecord): RouteRecord {
   return {
     schema_version: 1,
     task_id: task.task_id,
+    task_revision: task.revision ?? 1,
+    effective_contract_sha256: task.effective_contract_sha256,
+    phase: 'primary',
     role,
     model_class: modelClass,
     provider_model: MODELS[modelClass],
@@ -125,6 +129,8 @@ export function routeTask(task: TaskRecord): RouteRecord {
       escalation: ['default_worker_rejected', 'worker_verifier_disagreement', 'scope_or_policy_conflict', 'security_review_blocked'],
     },
     budget: task.budgets,
+    sandbox_mode: ROLE_METADATA[role as keyof typeof ROLE_METADATA]?.sandbox_mode ?? 'workspace-write',
+    approval_policy: 'on-request',
     created_at: new Date().toISOString(),
   };
 }

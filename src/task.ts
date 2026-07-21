@@ -1,5 +1,4 @@
-import { randomUUID } from 'node:crypto';
-import { readdir, rename, rm } from 'node:fs/promises';
+import { readdir, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { ReviewRecord, TaskKind, TaskProfile, TaskRecord, TaskState } from './models.js';
 import { PROFILE_DEFINITIONS, ROLE_IDS, type RoleId } from './config.js';
@@ -9,6 +8,7 @@ import { routeTask } from './router.js';
 import { resolveProjectRuntime } from './state.js';
 import { canonicalSha256 } from './lib/hash.js';
 import { taskContract, createTaskAmendment } from './amendment.js';
+import { withStateTransaction } from './lib/state-transaction.js';
 
 const TASK_EXTENSION = '.json';
 const LEGACY_TASK_EXTENSION = '.yaml';
@@ -91,7 +91,7 @@ async function locateTaskCandidates(stateRoot: string, taskId: string): Promise<
   return candidates;
 }
 
-async function migrateLegacyTask(path: string, task: TaskRecord): Promise<string> {
+export async function migrateLegacyTask(path: string, task: TaskRecord): Promise<string> {
   let destination = path;
   if (path.endsWith(LEGACY_TASK_EXTENSION)) {
     destination = `${path.slice(0, -LEGACY_TASK_EXTENSION.length)}${TASK_EXTENSION}`;
@@ -118,12 +118,21 @@ async function locateTask(stateRoot: string, taskId: string): Promise<{ path: st
   if (candidates.length > 1) throw new Error(`Duplicate task records exist for ${taskId}: ${candidates.join(', ')}`);
   const originalPath = candidates[0]!;
   const task = await readJson<TaskRecord>(originalPath);
-  const path = await migrateLegacyTask(originalPath, task);
-  const migrated = path === originalPath && task.schema_version === 1
-    ? await readJson<TaskRecord>(path)
-    : task.schema_version === 1 ? await readJson<TaskRecord>(path) : task;
-  validateTask(migrated);
-  return { path, task: migrated };
+  validateTask(task);
+  return { path: originalPath, task };
+}
+
+export function taskRequiresMigration(task: TaskRecord, path?: string): boolean { return task.schema_version === 1 || path?.endsWith(LEGACY_TASK_EXTENSION) === true; }
+export function requireCanonicalTask(task: TaskRecord, path?: string): void {
+  if (taskRequiresMigration(task, path)) throw new Error('Project state requires migration. Run:\n  agent-router migrate --check\n  agent-router migrate --apply');
+}
+
+export async function migrateTaskOnDisk(stateRoot: string, taskId: string): Promise<{ path: string; task: TaskRecord; changed: boolean }> {
+  const found = await locateTask(stateRoot, taskId);
+  if (!taskRequiresMigration(found.task, found.path)) return { ...found, changed: false };
+  const path = await migrateLegacyTask(found.path, found.task);
+  const task = await readJson<TaskRecord>(path); validateTask(task);
+  return { path, task, changed: true };
 }
 
 function requiredReviews(kind: TaskKind, profileRoles: string[]): string[] {
@@ -184,11 +193,11 @@ export async function createTask(input: {
   return task;
 }
 
-export async function getTask(taskId: string, cwd?: string): Promise<{ root: string; stateRoot: string; projectId: string; path: string; task: TaskRecord }> {
+export async function getTask(taskId: string, cwd?: string): Promise<{ root: string; stateRoot: string; projectId: string; path: string; task: TaskRecord; migration_required: boolean }> {
   const runtime = await resolveProjectRuntime(cwd);
   const found = await locateTask(runtime.stateRoot, taskId);
   validateTask(found.task);
-  return { root: runtime.repoRoot, stateRoot: runtime.stateRoot, projectId: runtime.projectId, ...found };
+  return { root: runtime.repoRoot, stateRoot: runtime.stateRoot, projectId: runtime.projectId, migration_required: taskRequiresMigration(found.task, found.path), ...found };
 }
 
 export async function listTasks(cwd?: string): Promise<TaskRecord[]> {
@@ -214,7 +223,8 @@ async function persistTransition(
   details?: Record<string, unknown>,
   mutate?: (task: TaskRecord) => void,
 ): Promise<TaskRecord> {
-  const { root, stateRoot, path, task } = await getTask(taskId, cwd);
+  const { root, stateRoot, projectId, path, task } = await getTask(taskId, cwd);
+  requireCanonicalTask(task, path);
   if (!ALLOWED[task.state].includes(to)) throw new Error(`Illegal task transition: ${task.state} -> ${to}`);
   const from = task.state;
   mutate?.(task);
@@ -222,20 +232,8 @@ async function persistTransition(
   task.updated_at = new Date().toISOString();
   validateTask(task);
   const destination = taskPath(stateRoot, to, taskId);
-  if (destination === path) {
-    await writeJson(path, task);
-  } else {
-    const staged = `${path}.moving-${randomUUID()}`;
-    await rename(path, staged);
-    try {
-      await writeJson(destination, task);
-      await rm(staged, { force: true });
-    } catch (error) {
-      await rm(destination, { force: true }).catch(() => undefined);
-      await rename(staged, path).catch(() => undefined);
-      throw error;
-    }
-  }
+  const data = `${JSON.stringify(task, null, 2)}\n`;
+  await withStateTransaction({ stateRoot, projectId, operation: `task transition ${taskId} ${from}->${to}`, plan: destination === path ? [{ kind: 'write', target: path, data }] : [{ kind: 'remove', target: path }, { kind: 'write', target: destination, data }] });
   await transitionEvent(stateRoot, taskId, from, to, details);
   void root;
   return task;
@@ -315,7 +313,8 @@ export async function supersedeTask(taskId: string, replacementTaskId: string, c
 }
 
 export async function routeAndPersist(taskId: string, cwd?: string): Promise<ReturnType<typeof routeTask>> {
-  const { root, stateRoot, task } = await getTask(taskId, cwd);
+  const { root, stateRoot, path, task } = await getTask(taskId, cwd);
+  requireCanonicalTask(task, path);
   if (task.state !== 'ready') throw new Error(`Task must be ready before routing; current state is ${task.state}`);
   const project = await readJson<{ enabled_roles?: RoleId[]; profile: TaskRecord['profile'] }>(resolve(stateRoot, 'project.yaml'));
   const definition = PROFILE_DEFINITIONS[project.profile];
@@ -333,6 +332,7 @@ export async function routeAndPersist(taskId: string, cwd?: string): Promise<Ret
     throw new Error(`Route requires disabled role ${route.role}. Enabled roles: ${enabledRoles.join(', ')}. Reclassify the task or register the project with the required profile.`);
   }
   await writeJson(resolve(stateRoot, 'generated', `${taskId}.route.json`), route);
+  await writeJson(resolve(stateRoot, 'generated/phases', taskId, 'primary.route.json'), { ...route, phase: 'primary', task_revision: task.revision ?? 1, effective_contract_sha256: task.effective_contract_sha256 });
   await transitionTask(taskId, 'routed', root, { route: route.role, model: route.provider_model });
   return route;
 }

@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { TaskAmendmentRecord, TaskContract, TaskRecord } from './models.js';
-import { getTask, validateTask } from './task.js';
+import type { ProfileDefinition, RoleId } from './config.js';
+import { PROFILE_DEFINITIONS } from './config.js';
+import { getTask, requireCanonicalTask, validateTask } from './task.js';
 import { appendEvent } from './events.js';
 import { canonicalSha256 } from './lib/hash.js';
 import { pathExists, readJson, withFileLock, writeJson } from './lib/fs.js';
@@ -40,7 +42,7 @@ function validatePathItems(items: string[] | undefined, field: string): void {
   for (const item of normalizeItems(items, field) ?? []) {
     assertRelativeProjectPath(item);
     const normalized = item.replaceAll('\\', '/');
-    if (normalized === '.agent-router' || normalized.startsWith('.agent-router/') || normalized === '.codex' || normalized.startsWith('.codex/')) {
+    if (field.endsWith('_add') && (normalized === '.agent-router' || normalized.startsWith('.agent-router/') || normalized === '.codex' || normalized.startsWith('.codex/'))) {
       throw new Error(`Agent Router internal path is forbidden in amendment ${field}: ${item}`);
     }
   }
@@ -96,6 +98,35 @@ export function applyAmendment(contract: ReturnType<typeof taskContract>, amendm
   return next;
 }
 
+export function validateEffectiveTaskContract(contract: ReturnType<typeof taskContract>, projectPolicy?: Record<string, unknown>, profileDefinition?: ProfileDefinition): void {
+  if (!contract.task_id || !contract.title.trim() || !contract.objective.trim()) throw new Error('Effective task contract requires task identity, title, and objective');
+  if (!PROFILE_DEFINITIONS[contract.profile]) throw new Error(`Effective task contract has an invalid profile: ${contract.profile}`);
+  for (const [key, max] of Object.entries({ ambiguity: 3, semantic_complexity: 3, security_criticality: 4, blast_radius: 3, novelty: 3, verification_strength: 3, context_scope: 3, destructive_potential: 3, historical_data_impact: 3 })) { const value = contract.task_profile[key as keyof typeof contract.task_profile] as number; if (!Number.isInteger(value) || value < 0 || value > max) throw new Error(`Invalid effective task profile field ${key}`); }
+  const stringList = (items: unknown, label: string): string[] => { if (!Array.isArray(items) || items.some((item) => typeof item !== 'string' || !item.trim())) throw new Error(`Effective contract ${label} must be a string array`); return items as string[]; };
+  const uniqueList = (items: string[], label: string): void => { if (new Set(items).size !== items.length) throw new Error(`Effective contract ${label} contains duplicates`); };
+  const allowedPaths = stringList(contract.scope.allowed_paths, 'allowed_paths'); const forbiddenPaths = stringList(contract.scope.forbidden_paths, 'forbidden_paths'); uniqueList(allowedPaths, 'allowed_paths'); uniqueList(forbiddenPaths, 'forbidden_paths');
+  const normalizedForbidden = contract.scope.forbidden_paths.map((item) => item.replaceAll('\\', '/').replace(/\/$/, ''));
+  for (const path of contract.scope.allowed_paths) { assertRelativeProjectPath(path); const normalized = path.replaceAll('\\', '/'); if (normalized === '.agent-router' || normalized.startsWith('.agent-router/') || normalized === '.codex' || normalized.startsWith('.codex/')) throw new Error(`Effective contract contains an internal path: ${path}`); }
+  for (const path of contract.scope.forbidden_paths) assertRelativeProjectPath(path);
+  if (contract.scope.allowed_paths.some((path) => normalizedForbidden.includes(path.replaceAll('\\', '/')))) throw new Error('Forbidden paths must override allowed paths');
+  if (!Number.isInteger(contract.budgets.maximum_files_read) || contract.budgets.maximum_files_read < 0 || !Number.isInteger(contract.budgets.maximum_context_bytes) || contract.budgets.maximum_context_bytes < 1 || !Number.isInteger(contract.budgets.maximum_single_file_bytes) || contract.budgets.maximum_single_file_bytes < 1 || !Number.isInteger(contract.budgets.maximum_tool_output_chars) || contract.budgets.maximum_tool_output_chars < 1) throw new Error('Effective contract contains invalid context budgets');
+  if (allowedPaths.length > contract.budgets.maximum_files_read) throw new Error('Effective contract exceeds maximum file budget');
+  stringList(contract.acceptance, 'acceptance'); stringList(contract.tests.targeted, 'targeted tests'); stringList(contract.tests.checkpoint, 'checkpoint tests'); stringList(contract.manual_verification, 'manual verification'); stringList(contract.outputs, 'outputs');
+  for (const key of ['repository_wide_scan', 'full_test_suite', 'recursive_delegation'] as const) if (typeof contract.budgets[key] !== 'boolean') throw new Error(`Effective contract budget ${key} must be boolean`);
+  if (typeof contract.review.required !== 'boolean') throw new Error('Effective contract review.required must be boolean');
+  const requiredRoles = stringList(contract.review.required_roles, 'required review roles'); const sequence = stringList(contract.review.sequence, 'review sequence'); uniqueList(sequence, 'review sequence');
+  if (requiredRoles.join('|') !== sequence.join('|')) throw new Error('Effective contract review sequence is invalid');
+  if (!contract.review.required && sequence.length) throw new Error('Effective contract cannot have review roles when review is disabled');
+  if (contract.review.required && !sequence.length) throw new Error('Effective contract requires at least one review role');
+  const definition = profileDefinition ?? PROFILE_DEFINITIONS[contract.profile];
+  const authorized = new Set(definition.roles);
+  for (const role of contract.review.sequence) if (role !== 'external_reviewer' && !authorized.has(role as RoleId)) throw new Error(`Effective contract review role is not authorized: ${role}`);
+  if (projectPolicy?.workflow && typeof projectPolicy.workflow === 'object') {
+    const required = (projectPolicy.workflow as Record<string, unknown>).required_review_roles;
+    if (Array.isArray(required) && required.some((role) => typeof role !== 'string')) throw new Error('Project review policy is invalid');
+  }
+}
+
 export async function loadAmendments(stateRoot: string, taskId: string): Promise<TaskAmendmentRecord[]> {
   const dir = resolve(stateRoot, 'tasks/amendments', taskId);
   if (!(await pathExists(dir))) return [];
@@ -128,6 +159,7 @@ export function materializeEffectiveTaskContract(task: TaskRecord, amendments: T
   const current = revisionOf(task);
   if (current !== expectedRevision) throw new Error(`Task revision ${current} does not match amendment chain ${expectedRevision}`);
   if (task.effective_contract_sha256 && task.effective_contract_sha256 !== previousHash) throw new Error('Task effective contract hash does not match amendment chain');
+  validateEffectiveTaskContract(contract);
   return contract;
 }
 
@@ -135,6 +167,7 @@ export async function createTaskAmendment(input: {
   taskId: string; cwd?: string; amendmentKind: TaskAmendmentRecord['amendment_kind']; source: TaskAmendmentRecord['source']; changes: TaskAmendmentRecord['changes']; sourceReviewRole?: string; sourceReviewSha256?: string;
 }): Promise<TaskAmendmentRecord> {
   const found = await getTask(input.taskId, input.cwd);
+  requireCanonicalTask(found.task, found.path);
   return withFileLock(resolve(found.stateRoot, 'locks', `task-${input.taskId}.lock`), { command: 'task amend', project_id: found.projectId }, async () => {
     const currentFound = await getTask(input.taskId, input.cwd);
     const amendments = await loadAmendments(currentFound.stateRoot, input.taskId);
@@ -157,8 +190,14 @@ export async function createTaskAmendment(input: {
     if (await pathExists(amendmentPath)) throw new Error(`Amendment revision already exists: ${record.to_revision}`);
     await writeJson(amendmentPath, record);
     const task = { ...currentFound.task, schema_version: 2 as const, revision: record.to_revision, previous_revision: record.from_revision, latest_amendment_id: record.amendment_id, effective_contract_sha256: record.resulting_contract_sha256, updated_at: now };
+    task.derived_state_status = 'stale';
     validateTask(task);
     await writeJson(currentFound.path, task);
+    const assignmentPath = resolve(currentFound.stateRoot, 'assignments/active', `${input.taskId}.json`);
+    if (await pathExists(assignmentPath)) {
+      const assignment = await readJson<import('./models.js').AssignmentRecord>(assignmentPath);
+      assignment.sync_required = true; assignment.updated_at = now; await writeJson(assignmentPath, assignment);
+    }
     await appendEvent(currentFound.stateRoot, { task_id: input.taskId, type: 'task_amended', details: { amendment_id: record.amendment_id, from_revision: record.from_revision, to_revision: record.to_revision } });
     return record;
   });

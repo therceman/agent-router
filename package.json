@@ -1,6 +1,6 @@
 {
   "name": "@therceman/agent-router",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Token-efficient, deterministic multi-agent development workflow router",
   "type": "module",
   "bin": {

@@ -76,7 +76,7 @@ test('v0.6 profile-specific machine state migrates without changing projects or 
   const result = await codexSetup({ apply: true, dryRun: false }) as { legacy_profile_metadata_removed: boolean };
   assert.equal(result.legacy_profile_metadata_removed, true);
   const config = JSON.parse(await readFile(resolve(home, '.agent-router/config.yaml'), 'utf8')) as Record<string, unknown>;
-  assert.equal(config.installed_version, '0.8.0');
+  assert.equal(config.installed_version, '0.8.1');
   assert.deepEqual(config.installed_roles, allInstallableRoles());
   assert.equal(Object.hasOwn(config, 'installed_profiles'), false);
   assert.equal(Object.hasOwn(config, 'enabled_roles'), false);

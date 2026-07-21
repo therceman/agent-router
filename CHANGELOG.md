@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.1
+
+- Added phase-aware primary/review assignments with ordered review contexts and explicit external-review handoff results.
+- Added monotonic transport/work assignment state, late-confirmation safety, provider close-action queue commands, and idempotent release recovery.
+- Added revision-bound refresh/reassignment, transaction journals with conservative recovery, nonce/heartbeat locks, and portable POSIX/Windows path validation.
+- Made inspection and migration checks read-only; 0.8.0 state migration is explicit and backed up.
+- Added strict effective-contract, role-result, phase, provider-action, transaction, route, context, and assignment schemas.
+
 ## 0.8.0
 
 - Added persistent, project- and role-scoped worker sessions with bounded reuse.
